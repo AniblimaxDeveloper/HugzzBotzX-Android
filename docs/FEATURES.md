@@ -1,26 +1,27 @@
-# HugzzBotzX Family V3.0 — Features and limitations
+# HugzzBotzX Family V4.0 — feature checklist
 
-## Working features in this build
+## Working local features
 
-- Premium light UI with lavender, pearl-white and soft pink accents.
-- User-supplied HugzzBotzX artwork used in the in-app header and Android launcher icon densities.
-- Live local device snapshot: battery, free storage, available RAM, device model and network transport.
-- Optional Android Usage Access flow and on-device daily app-usage report.
-- Configurable daily screen-time soft-goal threshold (1–5 hours). It is a reminder/report threshold, not an app blocker.
-- In-app focus timer (25 or 45 minutes) with stop control.
-- Flashlight on/off using Android Camera2 torch mode after runtime camera permission.
-- Slow SOS flash signal, limited to about one blink per second and automatically stopped after 10 seconds. It is not a rapid strobe.
-- Local activity history, local device report and Android share-sheet export.
-- Links to Android app permissions and Digital Wellbeing settings.
+- Live dashboard for battery, storage, RAM and connectivity.
+- Family nickname profile and optional emergency contact shortcut through Android dialer.
+- Parent dashboard lock using a locally salted PIN hash.
+- Usage Access setup and aggregate today / 7-day app usage reports.
+- Per-app soft usage goals (stored locally and shown against measured usage). These do not block or force-close apps.
+- Daily screen-time soft goal.
+- Daily routine checklist: six built-in tasks plus up to twelve custom tasks, with per-day state.
+- Private family check-in with Great / Okay / Need support choices.
+- Bedtime and study-start schedule planner. Times are saved as a plan; they do not trigger system alarms or enforce restrictions.
+- In-app focus timer.
+- Flashlight on/off with Camera2 and slow SOS (about one blink/second, max 10 seconds).
+- Local activity log and share-sheet report export.
+- Permission Center and shortcut to Android parental controls / Digital Wellbeing settings where supported by the device.
 
-## Deliberate limitations
+## Multi-device and enforcement limitations
 
-This version operates only on the phone on which it is installed. It has no network permission, remote relay, parent account, child-device connection, remote flashlight command, remote app blocking, screen viewing, audio capture, or hidden monitoring. The second-device card explains the prerequisites and does not pretend to be connected.
+This build does not remotely connect to or control a second device. No server, cloud sync, account backend, remote flash command, remote app blocker, screen viewer or hidden monitoring is included. A production multi-device system requires: authenticated parent accounts, pairing initiated and accepted on the supervised phone, encrypted transport, visible connection status, child-side disconnect/revoke, server authorization rules, and abuse-resistant audit logging.
 
-Android does not allow an ordinary app to silently or generally control another device. A real family service needs an authenticated parent account, a second app installed on the supervised phone, child-side disclosure and acceptance, encrypted transport, a visible active state and a reliable disconnect. Device-wide blocking or policy enforcement also requires supported Android supervision/enterprise enrollment and cannot be granted by an ordinary runtime permission.
-
-The app-usage report requires the user to explicitly enable Usage Access in Android Settings. The flashlight requires the user to grant Camera permission. Both permissions can be revoked in Android Settings.
+An ordinary Android app cannot silently take over another phone or generally force app blocks. Device-wide enforcement requires supported parental/supervised or enterprise device-owner enrollment and user-visible provisioning. Use Android Family Link / Digital Wellbeing for enforced controls not available to this ordinary app.
 
 ## Flash safety
 
-No turbo/high-frequency strobe mode is provided. Repetitive flashing can be unsafe for people with photosensitive epilepsy or discomfort. The included SOS is slow, short and automatically stopped. Avoid pointing the light at eyes or faces.
+No rapid turbo strobe is provided. Repetitive rapid flashing can be unsafe for photosensitive people. SOS is slow, short, and automatically stopped. Avoid pointing the torch at eyes or faces.

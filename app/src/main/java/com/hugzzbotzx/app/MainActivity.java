@@ -38,12 +38,16 @@ import android.os.StatFs;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.text.InputType;
+import android.content.res.ColorStateList;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -63,31 +67,35 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import android.util.Base64;
 
 /**
- * HugzzBotzX Family V3.0
+ * HugzzBotzX Family V4.0
  * Transparent, consent-based, on-device family wellbeing utilities.
  * It does not perform hidden monitoring or remote device takeover.
  */
 public class MainActivity extends Activity {
-    private static final int BG = Color.rgb(246, 244, 251);
+    private static final int BG = Color.rgb(246, 249, 255);
     private static final int SURFACE = Color.WHITE;
-    private static final int SURFACE_TINT = Color.rgb(241, 237, 252);
+    private static final int SURFACE_TINT = Color.rgb(235, 241, 255);
     private static final int TEXT = Color.rgb(39, 35, 58);
     private static final int MUTED = Color.rgb(119, 113, 139);
-    private static final int BORDER = Color.rgb(230, 225, 241);
-    private static final int PURPLE = Color.rgb(112, 78, 220);
-    private static final int PURPLE_DARK = Color.rgb(84, 53, 177);
-    private static final int PINK = Color.rgb(217, 119, 172);
-    private static final int GREEN = Color.rgb(37, 139, 102);
+    private static final int BORDER = Color.rgb(222, 230, 244);
+    private static final int PURPLE = Color.rgb(82, 105, 211);
+    private static final int PURPLE_DARK = Color.rgb(58, 78, 173);
+    private static final int PINK = Color.rgb(221, 139, 181);
+    private static final int GREEN = Color.rgb(37, 145, 119);
     private static final int ORANGE = Color.rgb(193, 116, 42);
     private static final int RED = Color.rgb(190, 69, 87);
 
     private static final int TAB_HOME = 0;
     private static final int TAB_PARENT = 1;
-    private static final int TAB_FLASH = 2;
-    private static final int TAB_USAGE = 3;
-    private static final int TAB_MORE = 4;
+    private static final int TAB_ROUTINE = 2;
+    private static final int TAB_FLASH = 3;
+    private static final int TAB_USAGE = 4;
+    private static final int TAB_MORE = 5;
     private static final int REQ_CAMERA = 701;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -106,6 +114,8 @@ public class MainActivity extends Activity {
     private boolean flashOn;
     private boolean flashPatternRunning;
     private int flashPulses;
+    private boolean parentUnlocked;
+    private boolean pinDialogShowing;
 
     private final Runnable flashPattern = new Runnable() {
         @Override public void run() {
@@ -196,6 +206,7 @@ public class MainActivity extends Activity {
         nav.setGravity(Gravity.CENTER);
         nav.addView(navItem("⌂", "Home", TAB_HOME), navWeight());
         nav.addView(navItem("♡", "Family", TAB_PARENT), navWeight());
+        nav.addView(navItem("✓", "Routine", TAB_ROUTINE), navWeight());
         nav.addView(navItem("☼", "Flash", TAB_FLASH), navWeight());
         nav.addView(navItem("◷", "Usage", TAB_USAGE), navWeight());
         nav.addView(navItem("•••", "More", TAB_MORE), navWeight());
@@ -223,6 +234,11 @@ public class MainActivity extends Activity {
     }
 
     private void navigate(int tab) {
+        if (currentTab == TAB_PARENT && tab != TAB_PARENT) parentUnlocked = false;
+        if (tab == TAB_PARENT && !parentUnlocked && hasParentPin()) {
+            showParentUnlockDialog();
+            return;
+        }
         currentTab = tab;
         renderPage();
     }
@@ -234,6 +250,7 @@ public class MainActivity extends Activity {
         addHeader();
         switch (currentTab) {
             case TAB_PARENT: buildParentalPage(); break;
+            case TAB_ROUTINE: buildRoutinePage(); break;
             case TAB_FLASH: buildFlashPage(); break;
             case TAB_USAGE: buildUsagePage(); break;
             case TAB_MORE: buildMorePage(); break;
@@ -255,7 +272,7 @@ public class MainActivity extends Activity {
         brand.addView(text("HUGZZBOTZX", 16, TEXT, true));
         brand.addView(text("FAMILY • SAFETY • WELLBEING", 9, MUTED, true));
         header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1f));
-        header.addView(pill("V3 FAMILY", PURPLE));
+        header.addView(pill("V4 FAMILY", PURPLE));
         pageContainer.addView(header, margin(0, 2, 0, 22));
     }
 
@@ -264,7 +281,7 @@ public class MainActivity extends Activity {
         LinearLayout hero = card(true);
         hero.addView(pill("PRIVATE • ON-DEVICE", PURPLE));
         hero.addView(text("A calmer,\nsafer digital day.", 29, TEXT, true), margin(0, 14, 0, 7));
-        hero.addView(text("Healthy screen habits, simple device insights and helpful tools — with the device owner's knowledge.",
+        hero.addView(text("Family routines, screen-time insights and practical safety tools — with clear controls and owner-first privacy.",
                 13, MUTED, false), margin(0, 0, 0, 15));
         LinearLayout heroButtons = row();
         heroButtons.addView(button("PARENTAL TOOLS", true, v -> navigate(TAB_PARENT)), new LinearLayout.LayoutParams(0, dp(46), 1f));
@@ -285,7 +302,9 @@ public class MainActivity extends Activity {
         LinearLayout actions = card(false);
         addActionRow(actions, "◷", "Screen-time overview", "Review today's app usage", () -> navigate(TAB_USAGE));
         addDivider(actions);
-        addActionRow(actions, "♡", "Family wellbeing", "Daily goals and focus timer", () -> navigate(TAB_PARENT));
+        addActionRow(actions, "♡", "Family wellbeing", "Daily goals, profile and parent settings", () -> navigate(TAB_PARENT));
+        addDivider(actions);
+        addActionRow(actions, "✓", "Daily family routine", "Checklist, schedule and check-in", () -> navigate(TAB_ROUTINE));
         addDivider(actions);
         addActionRow(actions, "☼", "Flashlight & SOS", "Steady light or slow SOS pattern", () -> navigate(TAB_FLASH));
         addDivider(actions);
@@ -296,13 +315,49 @@ public class MainActivity extends Activity {
         notice.addView(text("A CLEAR NOTE ABOUT REMOTE DEVICES", 11, PURPLE_DARK, true));
         notice.addView(text("This release controls and reads only the phone where it is installed. Remote family pairing needs a secure server and a second app that visibly accepts the connection; those services are not configured in this build.",
                 12, MUTED, false), margin(0, 7, 0, 0));
-        pageContainer.addView(notice);
+        pageContainer.addView(notice, margin(0, 0, 0, 14));
+
+        LinearLayout familyQuick = card(false);
+        familyQuick.addView(text("TODAY'S FAMILY CHECK-IN", 10, PURPLE_DARK, true));
+        String checkin = getPreferences(MODE_PRIVATE).getString(todayKey("checkin"), "Not completed");
+        familyQuick.addView(text(checkin, 17, TEXT, true), margin(0, 5, 0, 4));
+        familyQuick.addView(text("A private, on-device wellbeing check-in.", 11, MUTED, false));
+        addButton(familyQuick, "OPEN DAILY ROUTINE", true, v -> navigate(TAB_ROUTINE));
+        pageContainer.addView(familyQuick);
         addFooter();
     }
 
     private void buildParentalPage() {
         addEyebrow("FAMILY / PARENTAL WELLBEING");
-        addPageTitle("Family controls", "Wellbeing tools for this device. Usage access is optional and can be revoked in Android settings.");
+        addPageTitle("Family controls", "Transparent wellbeing settings for this phone. Remote supervision is not active in this release.");
+
+        LinearLayout profile = card(false);
+        profile.addView(text("LOCAL FAMILY PROFILE", 10, PURPLE_DARK, true));
+        String childName = getPreferences(MODE_PRIVATE).getString("child_nickname", "My child");
+        String emergencyPhone = getPreferences(MODE_PRIVATE).getString("emergency_phone", "Not set");
+        profile.addView(text(childName, 19, TEXT, true), margin(0, 6, 0, 3));
+        profile.addView(text("Supervised profile nickname • stored on this device", 10, MUTED, false));
+        addButton(profile, "EDIT PROFILE NAME", false, v -> editChildNickname());
+        addInfoRow(profile, "Emergency contact", emergencyPhone);
+        addButton(profile, "SET EMERGENCY CONTACT", false, v -> editEmergencyContact());
+        if (!"Not set".equals(emergencyPhone)) addButton(profile, "OPEN PHONE DIALER", true, v -> dialEmergencyContact());
+        pageContainer.addView(profile, margin(0, 0, 0, 16));
+
+        LinearLayout parentSecurity = card(false);
+        parentSecurity.addView(text("PARENT DASHBOARD SECURITY", 10, PURPLE_DARK, true));
+        parentSecurity.addView(text(hasParentPin() ? "Parent PIN is enabled" : "No parent PIN configured", 15, TEXT, true), margin(0, 6, 0, 3));
+        parentSecurity.addView(text("The PIN is hashed locally and is used to protect entry to this Family page. It is not an online account password.", 11, MUTED, false));
+        addButton(parentSecurity, hasParentPin() ? "CHANGE PARENT PIN" : "SET PARENT PIN", false, v -> showParentPinSetupDialog());
+        pageContainer.addView(parentSecurity, margin(0, 0, 0, 16));
+
+        LinearLayout schedule = card(false);
+        schedule.addView(text("FAMILY TIME PLAN", 10, PURPLE_DARK, true));
+        schedule.addView(text("Bedtime: " + savedTime("bedtime_minute", 21 * 60), 14, TEXT, true), margin(0, 7, 0, 3));
+        schedule.addView(text("Study start: " + savedTime("study_minute", 16 * 60), 14, TEXT, true), margin(0, 0, 0, 3));
+        schedule.addView(text("These are planning reminders only; Android app restrictions are not enforced by this ordinary app.", 10, MUTED, false), margin(0, 0, 0, 9));
+        addButton(schedule, "SET BEDTIME", false, v -> chooseRoutineTime("bedtime_minute", "Choose bedtime"));
+        addButton(schedule, "SET STUDY START", false, v -> chooseRoutineTime("study_minute", "Choose study start"));
+        pageContainer.addView(schedule, margin(0, 0, 0, 16));
 
         LinearLayout daily = card(true);
         daily.addView(text("DAILY SCREEN-TIME GOAL", 10, PURPLE_DARK, true));
@@ -330,7 +385,11 @@ public class MainActivity extends Activity {
         addDivider(utilities);
         addActionRow(utilities, "☾", "Plan a device break", "Open Android Digital Wellbeing settings", () -> openDigitalWellbeing());
         addDivider(utilities);
+        addActionRow(utilities, "⌂", "Android parental controls", "Open system parental settings if available", () -> openSystemParentalControls());
+        addDivider(utilities);
         addActionRow(utilities, "⚙", "Review app permissions", "Open this app's Android permission page", () -> openAppSettings());
+        addDivider(utilities);
+        addActionRow(utilities, "✓", "Daily routine checklist", "Homework, reading, rest and more", () -> navigate(TAB_ROUTINE));
         pageContainer.addView(utilities, margin(0, 0, 0, 17));
 
         addSection("FOCUS & BREAK TIMER", "An in-app wellbeing timer; it does not lock other apps");
@@ -349,7 +408,7 @@ public class MainActivity extends Activity {
         LinearLayout remote = card(false);
         remote.addView(pill("NOT CONNECTED", ORANGE));
         remote.addView(text("Connect another family device", 17, TEXT, true), margin(0, 9, 0, 4));
-        remote.addView(text("A real parent-to-child connection requires HugzzBotzX installed on both phones, a verified parent account, a child-side acceptance screen, and an encrypted relay. No remote command is sent from this build.",
+        remote.addView(text("This V4 package currently manages the phone where it is installed. Real parent-to-child remote control still needs a backend, parent sign-in, a second app on the child's phone, explicit child-side approval and a visible stop control. No remote command is sent from this build.",
                 12, MUTED, false), margin(0, 0, 0, 12));
         addButton(remote, "VIEW SAFE PAIRING REQUIREMENTS", false, v -> showRemoteRequirements());
         pageContainer.addView(remote, margin(0, 0, 0, 17));
@@ -364,6 +423,153 @@ public class MainActivity extends Activity {
         pageContainer.addView(limits);
         addFooter();
     }
+
+    private void buildRoutinePage() {
+        addEyebrow("FAMILY / DAILY ROUTINES");
+        addPageTitle("Daily routine", "Build a healthy rhythm together. Checklists and answers stay on this phone.");
+
+        LinearLayout checkin = card(true);
+        checkin.addView(text("HOW IS TODAY GOING?", 10, PURPLE_DARK, true));
+        String savedCheckin = getPreferences(MODE_PRIVATE).getString(todayKey("checkin"), "Not completed");
+        checkin.addView(text(savedCheckin, 18, TEXT, true), margin(0, 6, 0, 3));
+        checkin.addView(text("A simple family check-in — not a diagnosis or a public status.", 11, MUTED, false));
+        LinearLayout moodButtons = row();
+        String[] moods = {"Great", "Okay", "Need support"};
+        for (String mood : moods) {
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(42), 1f);
+            p.setMargins(dp(2), dp(10), dp(2), 0);
+            moodButtons.addView(button(mood, mood.equals(savedCheckin), v -> {
+                getPreferences(MODE_PRIVATE).edit().putString(todayKey("checkin"), mood).apply();
+                appendLog("Daily family check-in saved: " + mood);
+                renderPage();
+            }), p);
+        }
+        checkin.addView(moodButtons);
+        pageContainer.addView(checkin, margin(0, 0, 0, 16));
+
+        addSection("TODAY'S CHECKLIST", "Mark each activity when it is complete");
+        LinearLayout taskCard = card(false);
+        TextView progress = text("", 12, PURPLE_DARK, true);
+        taskCard.addView(progress, margin(0, 0, 0, 8));
+        String[][] defaults = {
+                {"morning", "Morning preparation"},
+                {"school", "School / learning time"},
+                {"homework", "Homework or reading"},
+                {"movement", "Move, stretch or play outside"},
+                {"family", "Spend time with family"},
+                {"winddown", "Wind-down before bedtime"}
+        };
+        ArrayList<CheckBox> boxes = new ArrayList<>();
+        String day = todayStamp();
+        for (String[] task : defaults) addRoutineCheck(taskCard, boxes, progress, "routine_" + day + "_" + task[0], task[1]);
+        JSONArray custom = getCustomTasks();
+        for (int i = 0; i < custom.length(); i++) {
+            String task = custom.optString(i, "");
+            if (!task.trim().isEmpty()) addRoutineCheck(taskCard, boxes, progress, "routine_" + day + "_custom_" + i, task);
+        }
+        updateRoutineProgress(progress, boxes);
+        addButton(taskCard, "ADD CUSTOM TASK", false, v -> addCustomTask());
+        addButton(taskCard, "RESET TODAY'S CHECKLIST", false, v -> resetRoutineToday());
+        pageContainer.addView(taskCard, margin(0, 0, 0, 16));
+
+        addSection("SCHEDULE PLANNER", "Set family routine times for reference");
+        LinearLayout plan = card(false);
+        addInfoRow(plan, "Study start", savedTime("study_minute", 16 * 60));
+        addInfoRow(plan, "Bedtime", savedTime("bedtime_minute", 21 * 60));
+        addButton(plan, "EDIT STUDY START", false, v -> chooseRoutineTime("study_minute", "Choose study start"));
+        addButton(plan, "EDIT BEDTIME", false, v -> chooseRoutineTime("bedtime_minute", "Choose bedtime"));
+        addButton(plan, "OPEN DIGITAL WELLBEING", true, v -> openDigitalWellbeing());
+        pageContainer.addView(plan, margin(0, 0, 0, 16));
+
+        LinearLayout safety = card(false);
+        safety.addView(text("FAMILY SAFETY SHORTCUTS", 10, PURPLE_DARK, true));
+        addActionRow(safety, "☎", "Emergency contact", "Open the phone dialer with the saved number", () -> dialEmergencyContact());
+        addDivider(safety);
+        addActionRow(safety, "⏱", "Focus timer", "Start a 25-minute study session", () -> startFocus(25));
+        addDivider(safety);
+        addActionRow(safety, "☼", "Flashlight / SOS", "Open safe flashlight controls", () -> navigate(TAB_FLASH));
+        pageContainer.addView(safety);
+        addFooter();
+    }
+
+    private void addRoutineCheck(LinearLayout parent, ArrayList<CheckBox> boxes, TextView progress, String key, String label) {
+        CheckBox box = new CheckBox(this);
+        box.setText(label);
+        box.setTextSize(13);
+        box.setTextColor(TEXT);
+        box.setPadding(dp(2), dp(5), dp(2), dp(5));
+        box.setButtonTintList(ColorStateList.valueOf(PURPLE));
+        box.setChecked(getPreferences(MODE_PRIVATE).getBoolean(key, false));
+        box.setOnCheckedChangeListener((button, checked) -> {
+            getPreferences(MODE_PRIVATE).edit().putBoolean(key, checked).apply();
+            appendLog((checked ? "Completed routine: " : "Unchecked routine: ") + label);
+            updateRoutineProgress(progress, boxes);
+        });
+        boxes.add(box);
+        parent.addView(box, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private void updateRoutineProgress(TextView progress, ArrayList<CheckBox> boxes) {
+        int done = 0;
+        for (CheckBox box : boxes) if (box.isChecked()) done++;
+        progress.setText(done + " / " + boxes.size() + " completed today");
+    }
+
+    private void addCustomTask() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Example: Pack school bag");
+        new AlertDialog.Builder(this).setTitle("Add a family task").setView(input)
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("ADD", (d, w) -> {
+                    String value = input.getText().toString().trim();
+                    if (value.length() < 2) { toast("Task name is too short"); return; }
+                    JSONArray tasks = getCustomTasks();
+                    if (tasks.length() >= 12) { toast("Maximum 12 custom tasks"); return; }
+                    tasks.put(value);
+                    getPreferences(MODE_PRIVATE).edit().putString("custom_tasks", tasks.toString()).apply();
+                    appendLog("Custom routine task added");
+                    renderPage();
+                }).show();
+    }
+
+    private JSONArray getCustomTasks() {
+        try { return new JSONArray(getPreferences(MODE_PRIVATE).getString("custom_tasks", "[]")); }
+        catch (JSONException e) { return new JSONArray(); }
+    }
+
+    private void resetRoutineToday() {
+        new AlertDialog.Builder(this).setTitle("Reset today's checklist?")
+                .setMessage("Only today's checked states will be cleared. Your task list and schedules remain.")
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("RESET", (d, w) -> {
+                    android.content.SharedPreferences.Editor editor = getPreferences(MODE_PRIVATE).edit();
+                    String day = todayStamp();
+                    for (String id : new String[]{"morning", "school", "homework", "movement", "family", "winddown"}) editor.remove("routine_" + day + "_" + id);
+                    JSONArray custom = getCustomTasks();
+                    for (int i = 0; i < custom.length(); i++) editor.remove("routine_" + day + "_custom_" + i);
+                    editor.apply();
+                    appendLog("Today's family routine checklist reset");
+                    renderPage();
+                }).show();
+    }
+
+    private void chooseRoutineTime(String preferenceKey, String title) {
+        int current = getPreferences(MODE_PRIVATE).getInt(preferenceKey, preferenceKey.startsWith("bedtime") ? 21 * 60 : 16 * 60);
+        new TimePickerDialog(this, (view, hour, minute) -> {
+            getPreferences(MODE_PRIVATE).edit().putInt(preferenceKey, hour * 60 + minute).apply();
+            appendLog(title + " set to " + String.format(Locale.getDefault(), "%02d:%02d", hour, minute));
+            renderPage();
+        }, current / 60, current % 60, true).show();
+    }
+
+    private String savedTime(String key, int fallback) {
+        int minute = getPreferences(MODE_PRIVATE).getInt(key, fallback);
+        return String.format(Locale.getDefault(), "%02d:%02d", (minute / 60) % 24, minute % 60);
+    }
+
+    private String todayStamp() { return new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date()); }
+    private String todayKey(String suffix) { return "today_" + todayStamp() + "_" + suffix; }
 
     private void buildFlashPage() {
         addEyebrow("TOOLS / FLASHLIGHT");
@@ -416,9 +622,14 @@ public class MainActivity extends Activity {
             summary.addView(usageSummaryView, margin(0, 5, 0, 2));
             boolean exceeded = total >= dailyLimitHours * 60L * 60L * 1000L;
             summary.addView(pill(exceeded ? "DAILY SOFT GOAL REACHED" : (dailyLimitHours + "H DAILY SOFT GOAL"), exceeded ? ORANGE : GREEN), margin(0, 7, 0, 0));
-            pageContainer.addView(summary, margin(0, 0, 0, 16));
+            pageContainer.addView(summary, margin(0, 0, 0, 12));
+            LinearLayout weekly = card(false);
+            weekly.addView(text("LAST 7 DAYS", 10, PURPLE_DARK, true));
+            weekly.addView(text(formatUsage(weeklyUsageMillis()), 22, TEXT, true), margin(0, 5, 0, 2));
+            weekly.addView(text("Combined foreground time reported by Android Usage Access", 10, MUTED, false));
+            pageContainer.addView(weekly, margin(0, 0, 0, 16));
 
-            addSection("MOST USED APPS", "Foreground time since midnight");
+            addSection("MOST USED APPS", "Tap an app to set a soft reminder goal or open Android settings");
             LinearLayout apps = card(false);
             List<UsageRow> rows = getUsageRows();
             if (rows.isEmpty()) {
@@ -433,10 +644,13 @@ public class MainActivity extends Activity {
                     line.addView(rank, new LinearLayout.LayoutParams(dp(28), -2));
                     LinearLayout name = column();
                     name.addView(text(item.label, 13, TEXT, true));
-                    name.addView(text(item.packageName, 9, MUTED, false));
+                    int appGoal = getPreferences(MODE_PRIVATE).getInt("app_goal_" + item.packageName, 0);
+                    String helper = item.packageName;
+                    if (appGoal > 0) helper += " • soft goal " + appGoal + " min" + (item.millis >= appGoal * 60000L ? " • reached" : "");
+                    name.addView(text(helper, 9, appGoal > 0 && item.millis >= appGoal * 60000L ? ORANGE : MUTED, false));
                     line.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
                     line.addView(text(formatUsage(item.millis), 12, PURPLE_DARK, true));
-                    line.setOnClickListener(v -> openPackageSettings(item.packageName));
+                    line.setOnClickListener(v -> showAppUsageOptions(item));
                     apps.addView(line, margin(0, 0, 0, 11));
                     if (i < shown - 1) addDivider(apps);
                 }
@@ -470,7 +684,18 @@ public class MainActivity extends Activity {
         addInfoRow(app, "Android", Build.VERSION.RELEASE + " / API " + Build.VERSION.SDK_INT);
         addInfoRow(app, "Device", deviceName());
         addInfoRow(app, "Security patch", Build.VERSION.SDK_INT >= 23 ? Build.VERSION.SECURITY_PATCH : "Unavailable");
+        addInfoRow(app, "Profile", getPreferences(MODE_PRIVATE).getString("child_nickname", "My child"));
+        addInfoRow(app, "Parent PIN", hasParentPin() ? "Enabled" : "Not configured");
         pageContainer.addView(app, margin(0, 0, 0, 16));
+
+        LinearLayout permissions = card(false);
+        permissions.addView(text("PERMISSION CENTER", 10, PURPLE_DARK, true));
+        addInfoRow(permissions, "Usage Access", hasUsageAccess() ? "Enabled" : "Not enabled");
+        addInfoRow(permissions, "Camera for flashlight", Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED ? "Granted" : "Not granted");
+        addInfoRow(permissions, "Network state", "Read-only status");
+        addButton(permissions, "OPEN ANDROID APP SETTINGS", false, v -> openAppSettings());
+        addButton(permissions, "MANAGE USAGE ACCESS", true, v -> openUsageAccessSettings());
+        pageContainer.addView(permissions, margin(0, 0, 0, 16));
 
         addSection("ACTIVITY LOG", activityLog.size() + " latest local events");
         LinearLayout history = card(false);
@@ -486,13 +711,166 @@ public class MainActivity extends Activity {
         addButton(pageContainer, "EXPORT DEVICE REPORT", true, v -> shareReport());
         addButton(pageContainer, "CLEAR LOCAL ACTIVITY LOG", false, v -> confirmClearHistory());
         addButton(pageContainer, "OPEN APP PERMISSIONS", false, v -> openAppSettings());
+        addButton(pageContainer, "OPEN USAGE ACCESS SETTINGS", false, v -> openUsageAccessSettings());
+        addButton(pageContainer, "EDIT FAMILY PROFILE", false, v -> navigate(TAB_PARENT));
+        addButton(pageContainer, "EXPORT FAMILY ROUTINE & DEVICE REPORT", true, v -> shareReport());
 
         LinearLayout privacy = card(false);
         privacy.addView(text("PRIVACY PROMISE", 11, PURPLE_DARK, true));
-        privacy.addView(text("No stealth mode • no screen capture • no keylogging • no hidden camera or microphone • no remote access service • no data upload in this version.",
+        privacy.addView(text("No stealth mode • no screen capture • no keylogging • no hidden camera or microphone • no remote access service • no data upload in this version. PIN and family routine data stay in local app storage.",
                 12, MUTED, false), margin(0, 6, 0, 0));
         pageContainer.addView(privacy, margin(0, 12, 0, 0));
         addFooter();
+    }
+
+    private void editChildNickname() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(getPreferences(MODE_PRIVATE).getString("child_nickname", "My child"));
+        input.setHint("Profile nickname");
+        new AlertDialog.Builder(this).setTitle("Child profile nickname").setView(input)
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("SAVE", (d, w) -> {
+                    String value = input.getText().toString().trim();
+                    if (value.isEmpty()) value = "My child";
+                    if (value.length() > 28) value = value.substring(0, 28);
+                    getPreferences(MODE_PRIVATE).edit().putString("child_nickname", value).apply();
+                    appendLog("Local family profile nickname updated");
+                    renderPage();
+                }).show();
+    }
+
+    private void editEmergencyContact() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_PHONE);
+        input.setText(getPreferences(MODE_PRIVATE).getString("emergency_phone", ""));
+        input.setHint("Phone number");
+        new AlertDialog.Builder(this).setTitle("Emergency contact").setMessage("Save a trusted contact number on this phone. Calls are opened in the dialer for you to review; this app does not place calls automatically.")
+                .setView(input).setNegativeButton("CANCEL", null)
+                .setPositiveButton("SAVE", (d, w) -> {
+                    String value = input.getText().toString().trim();
+                    if (value.length() > 24) { toast("Phone number too long"); return; }
+                    getPreferences(MODE_PRIVATE).edit().putString("emergency_phone", value).apply();
+                    appendLog("Emergency contact updated");
+                    renderPage();
+                }).show();
+    }
+
+    private void dialEmergencyContact() {
+        String phone = getPreferences(MODE_PRIVATE).getString("emergency_phone", "");
+        if (phone.trim().isEmpty()) { editEmergencyContact(); return; }
+        try { startActivity(new Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", phone, null))); }
+        catch (Exception e) { toast("Phone dialer is unavailable"); }
+    }
+
+    private boolean hasParentPin() {
+        return !getPreferences(MODE_PRIVATE).getString("parent_pin_hash", "").isEmpty();
+    }
+
+    private void showParentPinSetupDialog() {
+        LinearLayout fields = column();
+        fields.setPadding(dp(8), dp(4), dp(8), dp(4));
+        EditText first = new EditText(this);
+        first.setSingleLine(true);
+        first.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        first.setHint("New PIN (4–8 digits)");
+        EditText second = new EditText(this);
+        second.setSingleLine(true);
+        second.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        second.setHint("Confirm PIN");
+        fields.addView(first);
+        fields.addView(second);
+        new AlertDialog.Builder(this).setTitle("Set parent PIN")
+                .setMessage("This PIN protects entry to the Family dashboard on this device. It is stored as a salted hash, not as readable text.")
+                .setView(fields).setNegativeButton("CANCEL", null)
+                .setPositiveButton("SAVE PIN", (d, w) -> {
+                    String pin = first.getText().toString();
+                    String confirm = second.getText().toString();
+                    if (pin.length() < 4 || pin.length() > 8 || !pin.matches("[0-9]+")) { toast("PIN must contain 4–8 digits"); return; }
+                    if (!pin.equals(confirm)) { toast("PIN confirmation does not match"); return; }
+                    try {
+                        byte[] salt = new byte[16];
+                        new SecureRandom().nextBytes(salt);
+                        String salt64 = Base64.encodeToString(salt, Base64.NO_WRAP);
+                        String hash64 = Base64.encodeToString(hashParentPin(salt, pin), Base64.NO_WRAP);
+                        getPreferences(MODE_PRIVATE).edit().putString("parent_pin_salt", salt64).putString("parent_pin_hash", hash64).apply();
+                        parentUnlocked = true;
+                        appendLog("Parent dashboard PIN configured");
+                        toast("Parent PIN saved on this device");
+                        renderPage();
+                    } catch (Exception e) { toast("Could not secure the PIN on this device"); }
+                }).show();
+    }
+
+    private byte[] hashParentPin(byte[] salt, String pin) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(salt);
+        digest.update(pin.getBytes("UTF-8"));
+        return digest.digest();
+    }
+
+    private void showParentUnlockDialog() {
+        if (pinDialogShowing) return;
+        pinDialogShowing = true;
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        input.setHint("Parent PIN");
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Parent dashboard locked")
+                .setMessage("Enter the parent PIN configured on this phone.")
+                .setView(input).setNegativeButton("CANCEL", (d, w) -> { pinDialogShowing = false; })
+                .setPositiveButton("UNLOCK", null).create();
+        dialog.setOnDismissListener(d -> pinDialogShowing = false);
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            try {
+                String pin = input.getText().toString();
+                String salt64 = getPreferences(MODE_PRIVATE).getString("parent_pin_salt", "");
+                byte[] salt = Base64.decode(salt64, Base64.DEFAULT);
+                byte[] expected = Base64.decode(getPreferences(MODE_PRIVATE).getString("parent_pin_hash", ""), Base64.DEFAULT);
+                byte[] actual = hashParentPin(salt, pin);
+                if (MessageDigest.isEqual(expected, actual)) {
+                    parentUnlocked = true;
+                    currentTab = TAB_PARENT;
+                    dialog.dismiss();
+                    renderPage();
+                    appendLog("Parent dashboard unlocked");
+                } else {
+                    input.setError("Incorrect PIN");
+                }
+            } catch (Exception e) { input.setError("Could not verify PIN"); }
+        }));
+        dialog.show();
+    }
+
+    private void showAppUsageOptions(UsageRow item) {
+        int goal = getPreferences(MODE_PRIVATE).getInt("app_goal_" + item.packageName, 0);
+        String status = goal > 0 ? "Current soft daily goal: " + goal + " min" : "No app-specific soft goal set";
+        String[] actions = {"Set / change soft daily goal", "Open Android app settings", "Remove soft goal"};
+        new AlertDialog.Builder(this).setTitle(item.label).setMessage(status).setItems(actions, (d, which) -> {
+            if (which == 0) {
+                EditText input = new EditText(this);
+                input.setSingleLine(true);
+                input.setInputType(InputType.TYPE_CLASS_NUMBER);
+                input.setHint("Minutes per day (e.g. 60)");
+                if (goal > 0) input.setText(String.valueOf(goal));
+                new AlertDialog.Builder(this).setTitle("Soft reminder goal").setMessage("This records a target for your review. Android does not block or close the app.")
+                        .setView(input).setNegativeButton("CANCEL", null).setPositiveButton("SAVE", (dd, ww) -> {
+                            try {
+                                int minutes = Integer.parseInt(input.getText().toString().trim());
+                                if (minutes < 5 || minutes > 1440) { toast("Choose 5–1440 minutes"); return; }
+                                getPreferences(MODE_PRIVATE).edit().putInt("app_goal_" + item.packageName, minutes).apply();
+                                appendLog("Soft app usage goal set for " + item.label + ": " + minutes + " minutes");
+                                renderPage();
+                            } catch (Exception ex) { toast("Enter a valid number of minutes"); }
+                        }).show();
+            } else if (which == 1) openPackageSettings(item.packageName);
+            else {
+                getPreferences(MODE_PRIVATE).edit().remove("app_goal_" + item.packageName).apply();
+                appendLog("Soft app usage goal removed for " + item.label);
+                renderPage();
+            }
+        }).show();
     }
 
     private void startFocus(int minutes) {
@@ -634,6 +1012,16 @@ public class MainActivity extends Activity {
         } catch (Exception e) { toast("Pengaturan Usage Access tidak tersedia di perangkat ini."); }
     }
 
+    private void openSystemParentalControls() {
+        try {
+            startActivity(new Intent("android.settings.PARENTAL_CONTROLS_SETTINGS"));
+            appendLog("Opened Android parental controls settings");
+        } catch (Exception e) {
+            openDigitalWellbeing();
+            toast("System parental controls are not available on this device; opened Digital Wellbeing instead.");
+        }
+    }
+
     private void openDigitalWellbeing() {
         try {
             Intent i = new Intent("android.settings.DIGITAL_WELLBEING_SETTINGS");
@@ -659,6 +1047,19 @@ public class MainActivity extends Activity {
         cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0);
         long total = 0L;
         Map<String, UsageStats> stats = manager.queryAndAggregateUsageStats(cal.getTimeInMillis(), System.currentTimeMillis());
+        if (stats != null) for (UsageStats item : stats.values()) total += item.getTotalTimeInForeground();
+        return total;
+    }
+
+    private long weeklyUsageMillis() {
+        if (!hasUsageAccess()) return 0L;
+        UsageStatsManager manager = (UsageStatsManager) getSystemService(USAGE_STATS_SERVICE);
+        if (manager == null) return 0L;
+        Calendar start = Calendar.getInstance();
+        start.add(Calendar.DAY_OF_YEAR, -6);
+        start.set(Calendar.HOUR_OF_DAY, 0); start.set(Calendar.MINUTE, 0); start.set(Calendar.SECOND, 0); start.set(Calendar.MILLISECOND, 0);
+        long total = 0L;
+        Map<String, UsageStats> stats = manager.queryAndAggregateUsageStats(start.getTimeInMillis(), System.currentTimeMillis());
         if (stats != null) for (UsageStats item : stats.values()) total += item.getTotalTimeInForeground();
         return total;
     }
@@ -713,7 +1114,7 @@ public class MainActivity extends Activity {
     private void addHeaderSpacer() { pageContainer.addView(new View(this), margin(0, 5, 0, 5)); }
 
     private void addFooter() {
-        TextView footer = text("HUGZZBOTZX FAMILY  •  OWNER-FIRST PRIVACY", 9, MUTED, true);
+        TextView footer = text("HUGZZBOTZX FAMILY V4  •  OWNER-FIRST PRIVACY", 9, MUTED, true);
         footer.setGravity(Gravity.CENTER);
         pageContainer.addView(footer, margin(0, 22, 0, 5));
     }
@@ -848,7 +1249,12 @@ public class MainActivity extends Activity {
         report.append("Network: ").append(networkLabel()).append("\n");
         report.append("Usage access enabled: ").append(hasUsageAccess()).append("\n");
         report.append("Today's app usage: ").append(hasUsageAccess() ? formatUsage(todayUsageMillis()) : "Not permitted").append("\n");
-        report.append("Daily reminder goal: ").append(dailyLimitHours).append(" hours (soft reminder only)\n\n");
+        report.append("Daily reminder goal: ").append(dailyLimitHours).append(" hours (soft reminder only)\n");
+        report.append("Family profile: ").append(getPreferences(MODE_PRIVATE).getString("child_nickname", "My child")).append("\n");
+        report.append("Study start: ").append(savedTime("study_minute", 16 * 60)).append("\n");
+        report.append("Bedtime plan: ").append(savedTime("bedtime_minute", 21 * 60)).append("\n");
+        report.append("Today's check-in: ").append(getPreferences(MODE_PRIVATE).getString(todayKey("checkin"), "Not completed")).append("\n");
+        report.append("Last 7 days usage: ").append(hasUsageAccess() ? formatUsage(weeklyUsageMillis()) : "Not permitted").append("\n\n");
         report.append("PRIVACY: Usage information is queried locally and is not transmitted by this version. No remote device command, screen capture, microphone, keylogging or hidden monitoring is implemented.\n\n");
         report.append("RECENT APP EVENTS\n");
         if (activityLog.isEmpty()) report.append("No events\n");
@@ -949,7 +1355,7 @@ public class MainActivity extends Activity {
 
     private String appVersion() {
         try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
-        catch (Exception e) { return "3.0.0"; }
+        catch (Exception e) { return "4.0.0"; }
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
