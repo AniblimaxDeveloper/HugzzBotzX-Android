@@ -72,7 +72,7 @@ import java.security.SecureRandom;
 import android.util.Base64;
 
 /**
- * HugzzBotzX Family V4.0
+ * HugzzBotzX DevLab V5.0
  * Transparent, consent-based, on-device family wellbeing utilities.
  * It does not perform hidden monitoring or remote device takeover.
  */
@@ -96,6 +96,8 @@ public class MainActivity extends Activity {
     private static final int TAB_FLASH = 3;
     private static final int TAB_USAGE = 4;
     private static final int TAB_MORE = 5;
+    private static final int TAB_ADB = 6;
+    private static final int TAB_BUG_LAB = 7;
     private static final int REQ_CAMERA = 701;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -116,6 +118,9 @@ public class MainActivity extends Activity {
     private int flashPulses;
     private boolean parentUnlocked;
     private boolean pinDialogShowing;
+    private volatile boolean cpuTestRunning;
+    private volatile long benchmarkSink;
+    private volatile int memorySink;
 
     private final Runnable flashPattern = new Runnable() {
         @Override public void run() {
@@ -162,7 +167,8 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (currentTab != TAB_HOME) navigate(TAB_HOME);
+        if (currentTab == TAB_ADB || currentTab == TAB_BUG_LAB) navigate(TAB_MORE);
+        else if (currentTab != TAB_HOME) navigate(TAB_HOME);
         else super.onBackPressed();
     }
 
@@ -220,7 +226,7 @@ public class MainActivity extends Activity {
     private View navItem(String icon, String label, int tab) {
         LinearLayout item = column();
         item.setGravity(Gravity.CENTER);
-        boolean selected = currentTab == tab;
+        boolean selected = currentTab == tab || (tab == TAB_MORE && (currentTab == TAB_ADB || currentTab == TAB_BUG_LAB));
         item.setBackground(rounded(selected ? SURFACE_TINT : Color.TRANSPARENT, 15,
                 selected ? BORDER : Color.TRANSPARENT, selected ? 1 : 0));
         TextView glyph = text(icon, 20, selected ? PURPLE : MUTED, true);
@@ -254,6 +260,8 @@ public class MainActivity extends Activity {
             case TAB_FLASH: buildFlashPage(); break;
             case TAB_USAGE: buildUsagePage(); break;
             case TAB_MORE: buildMorePage(); break;
+            case TAB_ADB: buildAdbAssistantPage(); break;
+            case TAB_BUG_LAB: buildBugLabPage(); break;
             default: buildHomePage(); break;
         }
     }
@@ -272,7 +280,7 @@ public class MainActivity extends Activity {
         brand.addView(text("HUGZZBOTZX", 16, TEXT, true));
         brand.addView(text("FAMILY • SAFETY • WELLBEING", 9, MUTED, true));
         header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1f));
-        header.addView(pill("V4 FAMILY", PURPLE));
+        header.addView(pill("V5 DEVLAB", PURPLE));
         pageContainer.addView(header, margin(0, 2, 0, 22));
     }
 
@@ -309,6 +317,10 @@ public class MainActivity extends Activity {
         addActionRow(actions, "☼", "Flashlight & SOS", "Steady light or slow SOS pattern", () -> navigate(TAB_FLASH));
         addDivider(actions);
         addActionRow(actions, "▤", "Device report", "Share a local diagnostic summary", () -> shareReport());
+        addDivider(actions);
+        addActionRow(actions, "⌘", "Authorized ADB assistant", "Pair and inspect a device you own or are allowed to debug", () -> navigate(TAB_ADB));
+        addDivider(actions);
+        addActionRow(actions, "⌁", "Local Bug Lab", "Run bounded diagnostics on this phone only", () -> navigate(TAB_BUG_LAB));
         pageContainer.addView(actions, margin(0, 0, 0, 16));
 
         LinearLayout notice = card(false);
@@ -668,7 +680,15 @@ public class MainActivity extends Activity {
 
     private void buildMorePage() {
         addEyebrow("MORE / APP & HISTORY");
-        addPageTitle("More settings", "App information, privacy and the local activity record.");
+        addPageTitle("More settings", "App information, privacy, authorized debugging and local diagnostics.");
+
+        addSection("DEVELOPER TOOLKIT", "ADB helper and safe local test tools");
+        LinearLayout devTools = card(false);
+        addActionRow(devTools, "⌘", "Authorized ADB assistant", "Wireless ADB setup and read-only diagnostic commands", () -> navigate(TAB_ADB));
+        addDivider(devTools);
+        addActionRow(devTools, "⌁", "Local Bug Lab", "Short CPU, memory and app-health checks on this phone", () -> navigate(TAB_BUG_LAB));
+        pageContainer.addView(devTools, margin(0, 0, 0, 16));
+
         LinearLayout app = card(false);
         LinearLayout title = row();
         ImageView logo = new ImageView(this);
@@ -721,6 +741,209 @@ public class MainActivity extends Activity {
                 12, MUTED, false), margin(0, 6, 0, 0));
         pageContainer.addView(privacy, margin(0, 12, 0, 0));
         addFooter();
+    }
+
+    private void buildAdbAssistantPage() {
+        addEyebrow("DEVELOPER TOOLKIT / ADB");
+        addPageTitle("Authorized ADB assistant", "Pair an Android device you own or have explicit permission to debug. This app prepares commands; Termux runs ADB.");
+
+        LinearLayout status = card(true);
+        status.addView(pill("ANDROID 11+ • SAME WI-FI", PURPLE));
+        status.addView(text("Wireless debugging", 20, TEXT, true), margin(0, 9, 0, 4));
+        status.addView(text("On the target phone, open Developer options → Wireless debugging → Pair device with pairing code. Keep the target unlocked and approve the pairing there.", 12, MUTED, false));
+        addButton(status, "OPEN DEVELOPER OPTIONS ON THIS PHONE", false, v -> openDeveloperOptions());
+        pageContainer.addView(status, margin(0, 0, 0, 16));
+
+        addSection("STEP 1 • INSTALL ADB IN TERMUX", "Run this on the phone you use as the ADB host.");
+        LinearLayout install = card(false);
+        TextView installCmd = text("pkg update && pkg install android-tools", 12, TEXT, true);
+        installCmd.setTextIsSelectable(true);
+        install.addView(installCmd);
+        addButton(install, "COPY INSTALL COMMAND", true, v -> copyText("Termux install command", "pkg update && pkg install android-tools"));
+        pageContainer.addView(install, margin(0, 0, 0, 14));
+
+        addSection("STEP 2 • PAIR THE TARGET", "Use the pairing IP:PORT shown on the target phone. ADB will prompt for its one-time code.");
+        LinearLayout pair = card(false);
+        pair.addView(text("adb pair <PAIR_IP>:<PAIR_PORT>", 13, TEXT, true));
+        pair.addView(text("Example format only: adb pair 192.168.1.25:37123", 10, MUTED, false), margin(0, 4, 0, 0));
+        addButton(pair, "COPY PAIR TEMPLATE", true, v -> copyText("ADB pair template", "adb pair <PAIR_IP>:<PAIR_PORT>"));
+        pageContainer.addView(pair, margin(0, 0, 0, 14));
+
+        addSection("STEP 3 • CONNECT AND VERIFY", "The connection IP:PORT is displayed separately in Wireless debugging; it may differ from the pairing port.");
+        LinearLayout connect = card(false);
+        connect.addView(text("adb connect <DEVICE_IP>:<CONNECT_PORT>\nadb devices -l", 13, TEXT, true));
+        addButton(connect, "COPY CONNECT + VERIFY", true, v -> copyText("ADB connect commands", "adb connect <DEVICE_IP>:<CONNECT_PORT>\nadb devices -l"));
+        pageContainer.addView(connect, margin(0, 0, 0, 14));
+
+        addSection("SAFE READ-ONLY DIAGNOSTICS", "Copy a command, then run it manually in Termux after the target appears as device.");
+        LinearLayout diagnostics = card(false);
+        addAdbCommand(diagnostics, "Android version", "adb shell getprop ro.build.version.release");
+        addDivider(diagnostics);
+        addAdbCommand(diagnostics, "Battery state", "adb shell dumpsys battery");
+        addDivider(diagnostics);
+        addAdbCommand(diagnostics, "Storage overview", "adb shell df -h /data");
+        addDivider(diagnostics);
+        addAdbCommand(diagnostics, "Memory overview", "adb shell dumpsys meminfo");
+        addDivider(diagnostics);
+        addAdbCommand(diagnostics, "Third-party app inventory", "adb shell pm list packages -3");
+        addDivider(diagnostics);
+        addAdbCommand(diagnostics, "Recent system log (may contain private data)", "adb logcat -d -t 300");
+        pageContainer.addView(diagnostics, margin(0, 0, 0, 14));
+
+        LinearLayout warning = card(false);
+        warning.addView(text("IMPORTANT SECURITY NOTES", 11, ORANGE, true));
+        warning.addView(text("• Pairing requires the target owner to enable Wireless debugging and share the temporary pairing code.\n• Pairing and connection ports are different.\n• Run only commands you understand. These templates are read-only.\n• Logs can contain personal information; review and redact them before sharing.\n• To revoke access, open Wireless debugging → Paired devices → Forget, or revoke debugging authorizations.", 11, MUTED, false), margin(0, 6, 0, 0));
+        pageContainer.addView(warning, margin(0, 0, 0, 14));
+        addButton(pageContainer, "BACK TO MORE", false, v -> navigate(TAB_MORE));
+        addFooter();
+    }
+
+    private void addAdbCommand(LinearLayout parent, String label, String command) {
+        LinearLayout line = row();
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout info = column();
+        info.addView(text(label, 12, TEXT, true));
+        TextView code = text(command, 10, MUTED, false);
+        code.setTextIsSelectable(true);
+        info.addView(code, margin(0, 3, 0, 0));
+        line.addView(info, new LinearLayout.LayoutParams(0, -2, 1f));
+        Button copy = button("COPY", false, v -> copyText(label, command));
+        line.addView(copy, new LinearLayout.LayoutParams(dp(76), dp(40)));
+        parent.addView(line, margin(0, 7, 0, 7));
+    }
+
+    private void openDeveloperOptions() {
+        try {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
+        } catch (Exception e) {
+            try { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
+            catch (Exception ignored) { toast("Settings tidak tersedia di perangkat ini"); }
+        }
+    }
+
+    private void copyText(String label, String value) {
+        try {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            clipboard.setPrimaryClip(ClipData.newPlainText(label, value));
+            toast(label + " disalin");
+            appendLog("Copied " + label);
+        } catch (Exception e) {
+            toast("Tidak dapat menyalin teks");
+        }
+    }
+
+    private void buildBugLabPage() {
+        addEyebrow("DEVELOPER TOOLKIT / LOCAL BUG LAB");
+        addPageTitle("Local Bug Lab", "Bounded health checks for this phone only. No test is sent to another device and no real crash or freeze is triggered.");
+
+        LinearLayout scope = card(true);
+        scope.addView(pill("LOCAL DEVICE ONLY", GREEN));
+        scope.addView(text("Safe diagnostic sandbox", 20, TEXT, true), margin(0, 9, 0, 4));
+        scope.addView(text("Tests are short and capped: one CPU worker for up to 3 seconds, a temporary 4 MB memory allocation, and a caught exception simulation. Stop by leaving the page; the CPU test ends automatically.", 12, MUTED, false));
+        pageContainer.addView(scope, margin(0, 0, 0, 16));
+
+        addSection("DEVICE HEALTH", "Current values from Android system APIs.");
+        LinearLayout health = card(false);
+        addInfoRow(health, "Battery", batteryPercent() >= 0 ? batteryPercent() + "% • " + batteryStatus() : "Unavailable");
+        addInfoRow(health, "Available RAM", memoryFreeShort());
+        addInfoRow(health, "Free storage", storageFreeShort());
+        addInfoRow(health, "Network", networkLabel());
+        addInfoRow(health, "Android", Build.VERSION.RELEASE + " / API " + Build.VERSION.SDK_INT);
+        pageContainer.addView(health, margin(0, 0, 0, 16));
+
+        addSection("SAFE TESTS", "All workloads are constrained and run only inside this app.");
+        LinearLayout tests = card(false);
+        addActionRow(tests, "CPU", "CPU micro-benchmark", "One worker • maximum 3 seconds", () -> runCpuMicroBenchmark());
+        addDivider(tests);
+        addActionRow(tests, "RAM", "Memory allocation check", "Temporarily touches and releases 4 MB", () -> runMemoryCheck());
+        addDivider(tests);
+        addActionRow(tests, "APP", "Caught exception simulation", "Tests report handling without crashing the app", () -> runCaughtExceptionTest());
+        addDivider(tests);
+        addActionRow(tests, "NET", "Network state check", "Reads current Android connectivity status", () -> {
+            appendLog("Local network diagnostic: " + networkLabel());
+            new AlertDialog.Builder(this).setTitle("Network diagnostic").setMessage("Current network: " + networkLabel() + "\nThis check does not send traffic to another device.").setPositiveButton("OK", null).show();
+        });
+        pageContainer.addView(tests, margin(0, 0, 0, 14));
+
+        LinearLayout report = card(false);
+        report.addView(text("BUG REPORT EXPORT", 11, PURPLE_DARK, true));
+        report.addView(text("Create a local text report with device model, Android version, battery, RAM, storage, network and recent HugzzBotzX events. Review it before sharing.", 11, MUTED, false), margin(0, 6, 0, 5));
+        addButton(report, "SHARE DIAGNOSTIC REPORT", true, v -> shareReport());
+        pageContainer.addView(report, margin(0, 0, 0, 14));
+
+        LinearLayout boundary = card(false);
+        boundary.addView(text("WHAT THIS LAB DOES NOT DO", 11, ORANGE, true));
+        boundary.addView(text("It does not send lag/crash payloads, exploit vulnerabilities, flood networks, kill another device's processes, force bootloops, or bypass Android permissions. For app crash debugging, use a test build and the target owner's approved ADB/logcat session.", 11, MUTED, false), margin(0, 6, 0, 0));
+        pageContainer.addView(boundary, margin(0, 0, 0, 14));
+        addButton(pageContainer, "BACK TO MORE", false, v -> navigate(TAB_MORE));
+        addFooter();
+    }
+
+    private void runCpuMicroBenchmark() {
+        if (cpuTestRunning) {
+            toast("CPU test sedang berjalan");
+            return;
+        }
+        cpuTestRunning = true;
+        appendLog("Started bounded CPU micro-benchmark (one worker, max 3 seconds)");
+        Toast.makeText(this, "CPU test berjalan maksimal 3 detik…", Toast.LENGTH_SHORT).show();
+        Thread worker = new Thread(() -> {
+            long start = SystemClock.elapsedRealtime();
+            long end = start + 3000L;
+            long value = 0x1234ABCDL;
+            long iterations = 0;
+            while (SystemClock.elapsedRealtime() < end && !Thread.currentThread().isInterrupted()) {
+                value = (value * 1664525L + 1013904223L) & 0x7fffffffL;
+                iterations++;
+            }
+            benchmarkSink = value;
+            long duration = Math.max(1L, SystemClock.elapsedRealtime() - start);
+            long count = iterations;
+            handler.post(() -> {
+                cpuTestRunning = false;
+                appendLog("CPU micro-benchmark complete: " + count + " iterations / " + duration + " ms");
+                new AlertDialog.Builder(this).setTitle("CPU micro-benchmark")
+                        .setMessage("Completed on this phone.\nDuration: " + duration + " ms\nIterations: " + count + "\nOne worker only; no remote workload was sent.")
+                        .setPositiveButton("OK", null).show();
+            });
+        }, "HugzzBotzX-Local-CPU-Test");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void runMemoryCheck() {
+        try {
+            byte[] sample = new byte[4 * 1024 * 1024];
+            int checksum = 0;
+            for (int i = 0; i < sample.length; i += 4096) {
+                sample[i] = (byte) (i & 0x7f);
+                checksum += sample[i];
+            }
+            memorySink = checksum;
+            int sizeMb = sample.length / (1024 * 1024);
+            appendLog("Local memory allocation check passed: " + sizeMb + " MB temporary buffer");
+            new AlertDialog.Builder(this).setTitle("Memory check passed")
+                    .setMessage("Allocated and touched " + sizeMb + " MB temporarily, then released the buffer.\nChecksum: " + checksum)
+                    .setPositiveButton("OK", null).show();
+        } catch (OutOfMemoryError error) {
+            appendLog("Local memory check skipped: insufficient app heap");
+            new AlertDialog.Builder(this).setTitle("Memory check unavailable")
+                    .setMessage("Android could not provide the small temporary test buffer. No further allocation was attempted.")
+                    .setPositiveButton("OK", null).show();
+        }
+    }
+
+    private void runCaughtExceptionTest() {
+        String result;
+        try {
+            throw new IllegalStateException("HugzzBotzX test exception — intentionally caught");
+        } catch (RuntimeException e) {
+            result = e.getClass().getSimpleName() + ": " + e.getMessage();
+        }
+        appendLog("Caught exception simulation passed; app process remained alive");
+        new AlertDialog.Builder(this).setTitle("Exception handling test passed")
+                .setMessage("A test exception was created and caught safely. The application was not crashed.\n\n" + result)
+                .setPositiveButton("OK", null).show();
     }
 
     private void editChildNickname() {
@@ -1114,7 +1337,7 @@ public class MainActivity extends Activity {
     private void addHeaderSpacer() { pageContainer.addView(new View(this), margin(0, 5, 0, 5)); }
 
     private void addFooter() {
-        TextView footer = text("HUGZZBOTZX FAMILY V4  •  OWNER-FIRST PRIVACY", 9, MUTED, true);
+        TextView footer = text("HUGZZBOTZX DEVLAB V5  •  AUTHORIZED DEBUGGING ONLY", 9, MUTED, true);
         footer.setGravity(Gravity.CENTER);
         pageContainer.addView(footer, margin(0, 22, 0, 5));
     }
@@ -1255,7 +1478,7 @@ public class MainActivity extends Activity {
         report.append("Bedtime plan: ").append(savedTime("bedtime_minute", 21 * 60)).append("\n");
         report.append("Today's check-in: ").append(getPreferences(MODE_PRIVATE).getString(todayKey("checkin"), "Not completed")).append("\n");
         report.append("Last 7 days usage: ").append(hasUsageAccess() ? formatUsage(weeklyUsageMillis()) : "Not permitted").append("\n\n");
-        report.append("PRIVACY: Usage information is queried locally and is not transmitted by this version. No remote device command, screen capture, microphone, keylogging or hidden monitoring is implemented.\n\n");
+        report.append("PRIVACY: Usage information and diagnostic tests are local. ADB commands are copied for the user to run in Termux after the target device explicitly enables Wireless debugging and accepts pairing. No exploit, destructive command, hidden monitoring, screen capture or remote takeover is included.\n\n");
         report.append("RECENT APP EVENTS\n");
         if (activityLog.isEmpty()) report.append("No events\n");
         else for (int i = 0; i < Math.min(activityLog.size(), 25); i++) report.append("- ").append(activityLog.get(i)).append("\n");
@@ -1355,7 +1578,7 @@ public class MainActivity extends Activity {
 
     private String appVersion() {
         try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
-        catch (Exception e) { return "4.0.0"; }
+        catch (Exception e) { return "5.0.0"; }
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }

@@ -1,10 +1,12 @@
-# Security and privacy notes — V4
+# Security and privacy — V5.0
 
-- The optional parent PIN protects only the Family screen within this app; it is not a secure online identity and cannot replace Android account/device authentication.
-- The PIN is salted and hashed using SHA-256, then stored in app-private SharedPreferences.
-- Family nickname, emergency phone, check-in, schedule, routine states, per-app soft goals and activity history are local-only.
-- Reports are shared only after an explicit user tap through Android's share sheet.
-- Usage Access is optional; data is read from Android UsageStatsManager on this device.
-- Camera permission is requested only when the flashlight or SOS is invoked.
-- No Internet permission is declared in the manifest.
-- No remote command, hidden monitoring, camera/microphone capture, screen capture, keyboard capture, or stealth service is present.
+- This app does not declare Internet permission and has no server connection.
+- Camera permission remains runtime-requested only for local flashlight / SOS.
+- Usage Access is optional and granted manually in Android Settings.
+- The ADB assistant is a local command-copy helper. Pairing credentials are not stored in app preferences.
+- ADB must be run by the user in Termux. Wireless debugging is enabled on the target phone by its owner, who approves pairing.
+- Read-only command templates are provided. There are no destructive shell commands, payload delivery, exploits or silent access paths.
+- The Bug Lab runs bounded tests on the current app process only: one CPU worker for at most 3 seconds, a temporary 4 MB buffer, and a caught exception simulation.
+- Logcat may contain private application or device information; review and redact before sharing.
+- Parent PIN, family profile and activity history remain in local private app preferences.
+- The target owner can revoke ADB pairing from Wireless debugging → Paired devices → Forget or revoke debugging authorizations.
