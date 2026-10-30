@@ -1,52 +1,85 @@
-# Termux workflow
+# Termux → GitHub → APK
 
-This project is designed so Termux can create/push the source while GitHub Actions performs the Android SDK build.
-
-## 1. Install the command-line tools
-
-```bash
-pkg update -y
-pkg install -y git gh unzip
-```
-
-If Termux cannot reach its configured repository, fix/change the Termux mirror first with `termux-change-repo`, then run the install commands again.
-
-## 2. Put the project in your Termux home
-
-Extract the downloaded project ZIP, then enter its folder. For example, if the ZIP is in Downloads:
+## A. Install the tools
 
 ```bash
 termux-setup-storage
-mkdir -p ~/projects
-unzip /sdcard/Download/HugzzBotzX.zip -d ~/projects/
-cd ~/projects/HugzzBotzX
+pkg update -y
+pkg install git gh unzip -y
 ```
 
-## 3. Push to GitHub
+Authenticate GitHub once:
 
 ```bash
-git init
-git add .
-git commit -m "Initial HugzzBotzX consent support app"
 gh auth login
 ```
 
-Create the remote repository and push:
+Choose GitHub.com, HTTPS, and browser/device-code authentication.
+
+## B. Replace the old source safely
+
+Download `HugzzBotzX-Premium-V2.zip` into Android's Download folder. Back up the existing project first:
 
 ```bash
-gh repo create HugzzBotzX-Android --public --source=. --remote=origin --push
+cd ~/projects
+cp -a HugzzBotzX "HugzzBotzX-backup-$(date +%Y%m%d-%H%M%S)"
 ```
 
-If the repository already exists, use its URL instead:
+Extract the new source over the project folder (the existing `.git` directory is not inside the ZIP and remains untouched):
 
 ```bash
-git remote add origin https://github.com/USERNAME/HugzzBotzX-Android.git
+unzip -o /sdcard/Download/HugzzBotzX-Premium-V2.zip -d ~/projects
+cd ~/projects/HugzzBotzX
+```
+
+The ZIP contains the project source, icon assets, README, and GitHub Actions workflow. It intentionally does not include `.git` or build outputs.
+
+## C. Set Git identity correctly
+
+The setting names must be `user.name` and `user.email` (not your username/email as the key):
+
+```bash
+cd ~/projects/HugzzBotzX
+GH_USER="$(gh api user --jq .login)"
+GH_ID="$(gh api user --jq .id)"
+git config --local user.name "$GH_USER"
+git config --local user.email "${GH_ID}+${GH_USER}@users.noreply.github.com"
+```
+
+Verify:
+
+```bash
+git config --get user.name
+git config --get user.email
+```
+
+## D. Commit and push
+
+```bash
 git branch -M main
+git add .
+git commit -m "HugzzBotzX Premium V2"
+```
+
+Create the empty repository if it does not exist, then connect it:
+
+```bash
+GH_USER="$(gh api user --jq .login)"
+if ! gh repo view "$GH_USER/HugzzBotzX-Android" >/dev/null 2>&1; then
+  gh repo create HugzzBotzX-Android --public
+fi
+
+git remote get-url origin >/dev/null 2>&1 \
+  && git remote set-url origin "https://github.com/$GH_USER/HugzzBotzX-Android.git" \
+  || git remote add origin "https://github.com/$GH_USER/HugzzBotzX-Android.git"
+
 git push -u origin main
 ```
 
-Replace `USERNAME` with your own GitHub username. Do not upload GitHub tokens, passwords, or private keys into this project.
+If `git commit` says there is nothing to commit, that means the current source has already been committed; proceed to the remote/push commands.
 
-## 4. Download the APK
+## E. Get the APK
 
-On GitHub, open `HugzzBotzX` → **Actions** → latest successful **Build HugzzBotzX APK** run → **Artifacts** → `HugzzBotzX-debug-apk`.
+Open the repository → **Actions** → **Build HugzzBotzX Premium APK**. The workflow produces a debug-signed APK as an artifact. Download and extract `HugzzBotzX-Premium-debug-apk`, then install `app-debug.apk`.
+
+If the workflow fails, open the failed run and copy the first red error section. Do not delete `.git`, reinitialize the repository, or make a second repository just to fix a Gradle error.

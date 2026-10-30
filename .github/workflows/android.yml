@@ -1,4 +1,4 @@
-name: Build HugzzBotzX APK
+name: Build HugzzBotzX Premium APK
 
 on:
   push:
@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
@@ -20,11 +21,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android platform
+      - name: Install Android platform and build tools
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle 9.6.0
@@ -32,13 +34,17 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
+      - name: Verify project configuration
+        run: gradle --no-daemon tasks --all
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: HugzzBotzX-debug-apk
+          name: HugzzBotzX-Premium-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
