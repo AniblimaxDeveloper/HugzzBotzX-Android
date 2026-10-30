@@ -5,18 +5,14 @@ import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
-import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
-import android.content.pm.PackageInfo;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.ConnectivityManager;
-import android.net.Network;
-import android.net.NetworkCapabilities;
-import android.net.Uri;
+import android.net.NetworkInfo;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -25,1051 +21,910 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.StatFs;
 import android.os.SystemClock;
-import android.provider.Settings;
 import android.text.TextUtils;
-import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.File;
+import org.json.JSONArray;
+import org.json.JSONException;
+
 import java.security.SecureRandom;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
-import java.util.TimeZone;
 
 /**
- * HugzzBotzX Premium — transparent, consent-based device support dashboard.
- * All working features in this build are local to this Android device.
- * It intentionally does not include covert monitoring, remote input,
- * screen/audio capture, camera capture, Accessibility abuse, or hidden services.
+ * HugzzBotzX Premium V2.0
+ * Transparent, owner-consented device-support dashboard.
+ * This build is intentionally local-only: no remote-control, surveillance,
+ * screen capture, camera, microphone, Accessibility Service, or hidden service.
  */
 public class MainActivity extends Activity {
-    private static final int BG = Color.rgb(7, 8, 11);
-    private static final int PANEL = Color.rgb(19, 21, 27);
-    private static final int PANEL_2 = Color.rgb(26, 28, 35);
-    private static final int TEXT = Color.rgb(245, 246, 250);
-    private static final int MUTED = Color.rgb(151, 155, 169);
-    private static final int LINE = Color.rgb(48, 51, 61);
-    private static final int SILVER = Color.rgb(226, 229, 238);
-    private static final int GREEN = Color.rgb(128, 222, 164);
-    private static final int AMBER = Color.rgb(245, 194, 112);
-    private static final int RED = Color.rgb(255, 125, 125);
+    private static final int BG = Color.rgb(8, 9, 13);
+    private static final int PANEL = Color.rgb(18, 20, 28);
+    private static final int PANEL_ALT = Color.rgb(25, 28, 38);
+    private static final int WHITE = Color.rgb(244, 245, 249);
+    private static final int MUTED = Color.rgb(151, 157, 171);
+    private static final int BORDER = Color.rgb(43, 47, 61);
+    private static final int SILVER = Color.rgb(220, 224, 235);
+    private static final int PURPLE = Color.rgb(169, 153, 255);
+    private static final int GREEN = Color.rgb(116, 220, 163);
+    private static final int ORANGE = Color.rgb(255, 197, 120);
 
-    private static final String PREFS = "hugzzbotzx_premium_local";
-    private static final String KEY_LOGS = "audit_logs";
-    private static final String KEY_DIAGNOSTICS = "last_diagnostics";
-    private static final String KEY_DIAGNOSTICS_AT = "last_diagnostics_at";
     private static final int TAB_HOME = 0;
-    private static final int TAB_DEVICE = 1;
-    private static final int TAB_SESSIONS = 2;
-    private static final int TAB_TOOLS = 3;
-    private static final long PAIRING_VALID_MS = 5 * 60 * 1000L;
+    private static final int TAB_TOOLS = 1;
+    private static final int TAB_ACTIVITY = 2;
+    private static final int TAB_SETTINGS = 3;
 
-    private SharedPreferences preferences;
-    private LinearLayout pageHost;
-    private TextView pairingCodeView;
-    private TextView pairingMetaView;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final ArrayList<String> activityLog = new ArrayList<>();
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    private LinearLayout pageContainer;
+    private LinearLayout navContainer;
+    private int currentTab = TAB_HOME;
+    private boolean sessionActive = false;
+    private long sessionStartedAt = 0L;
+    private String pairingCode = "";
+    private long pairingExpiresAt = 0L;
     private TextView sessionTimerView;
-    private TextView homeBatteryView;
-    private TextView homeStorageView;
-    private TextView homeMemoryView;
-    private TextView homeNetworkView;
-    private TextView sessionStatusView;
-    private TextView sessionBannerView;
-    private String pairingCode;
-    private long pairingExpiresAt;
-    private boolean sessionActive;
-    private long sessionStartedAt;
-    private int selectedTab = TAB_HOME;
-    private String lastDiagnostics = "Belum ada diagnostik yang dijalankan.";
-    private String lastDiagnosticsAt = "-";
-    private boolean resumedOnce = false;
-    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private TextView pairingCountdownView;
+
     private final Runnable uiTicker = new Runnable() {
         @Override public void run() {
-            updatePairingViews();
             if (sessionTimerView != null && sessionActive) {
-                sessionTimerView.setText(formatDuration(SystemClock.elapsedRealtime() - sessionStartedAt));
+                sessionTimerView.setText("Durasi sesi: " + formatDuration(
+                        (SystemClock.elapsedRealtime() - sessionStartedAt) / 1000L));
             }
-            uiHandler.postDelayed(this, 1000L);
+            if (pairingCountdownView != null) {
+                if (TextUtils.isEmpty(pairingCode)) {
+                    pairingCountdownView.setText("Buat kode demo baru untuk memulai.");
+                } else {
+                    long remaining = pairingExpiresAt - System.currentTimeMillis();
+                    if (remaining <= 0L) {
+                        pairingCountdownView.setText("Kode demo kedaluwarsa. Buat kode baru.");
+                    } else {
+                        pairingCountdownView.setText("Kedaluwarsa dalam " + (remaining / 60000L)
+                                + "m " + ((remaining / 1000L) % 60L) + "d • kode demo lokal");
+                    }
+                }
+            }
+            handler.postDelayed(this, 1000L);
         }
     };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
-        lastDiagnostics = preferences.getString(KEY_DIAGNOSTICS, lastDiagnostics);
-        lastDiagnosticsAt = preferences.getString(KEY_DIAGNOSTICS_AT, lastDiagnosticsAt);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         getWindow().getDecorView().setSystemUiVisibility(0);
+        loadActivityLog();
         buildShell();
         renderPage();
-        refreshDeviceInfo();
     }
 
-    @Override
-    protected void onResume() {
+    @Override protected void onResume() {
         super.onResume();
-        refreshDeviceInfo();
-        if (resumedOnce) renderPage();
-        resumedOnce = true;
-        uiHandler.removeCallbacks(uiTicker);
-        uiHandler.post(uiTicker);
+        handler.removeCallbacks(uiTicker);
+        handler.post(uiTicker);
     }
 
-    @Override
-    protected void onPause() {
-        uiHandler.removeCallbacks(uiTicker);
-        if (sessionActive) {
-            finishSession("Sesi otomatis berakhir saat aplikasi ditinggalkan.", false);
-        }
+    @Override protected void onPause() {
+        handler.removeCallbacks(uiTicker);
         super.onPause();
     }
 
-    private void buildShell() {
-        LinearLayout shell = vertical();
-        shell.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(12, 13, 18), BG, Color.rgb(5, 6, 9)}));
-        if (Build.VERSION.SDK_INT >= 21) {
-            shell.setOnApplyWindowInsetsListener((view, insets) -> {
-                view.setPadding(0, insets.getSystemWindowInsetTop(), 0,
-                        insets.getSystemWindowInsetBottom());
-                return insets;
-            });
+    @Override protected void onDestroy() {
+        handler.removeCallbacks(uiTicker);
+        super.onDestroy();
+    }
+
+    @Override public void onBackPressed() {
+        if (currentTab != TAB_HOME) {
+            currentTab = TAB_HOME;
+            renderPage();
+        } else {
+            super.onBackPressed();
         }
+    }
+
+    private void buildShell() {
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setBackgroundColor(BG);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
-        pageHost = vertical();
-        pageHost.setPadding(dp(19), dp(18), dp(19), dp(24));
-        scroll.addView(pageHost, new ScrollView.LayoutParams(
+        pageContainer = new LinearLayout(this);
+        pageContainer.setOrientation(LinearLayout.VERTICAL);
+        pageContainer.setPadding(dp(18), dp(16), dp(18), dp(24));
+        scroll.addView(pageContainer, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         shell.addView(scroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-        shell.addView(buildBottomNavigation(), new LinearLayout.LayoutParams(
+        navContainer = new LinearLayout(this);
+        navContainer.setOrientation(LinearLayout.VERTICAL);
+        shell.addView(navContainer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            shell.setOnApplyWindowInsetsListener((view, insets) -> {
+                Insets bars = insets.getInsets(WindowInsets.Type.systemBars()
+                        | WindowInsets.Type.displayCutout());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+        }
         setContentView(shell);
+        if (Build.VERSION.SDK_INT >= 30) shell.requestApplyInsets();
     }
 
-    private View buildBottomNavigation() {
-        LinearLayout nav = horizontal();
-        nav.setGravity(Gravity.CENTER);
+    private LinearLayout buildBottomNavigation() {
+        LinearLayout nav = new LinearLayout(this);
+        nav.setOrientation(LinearLayout.HORIZONTAL);
         nav.setPadding(dp(8), dp(9), dp(8), dp(10));
-        nav.setBackground(rounded(PANEL, 20, LINE, 1));
-        nav.setElevation(dp(12));
-        String[] labels = {"HOME", "DEVICE", "SESSIONS", "TOOLS"};
-        String[] symbols = {"⌂", "▦", "◷", "⚙"};
-        for (int i = 0; i < labels.length; i++) {
-            final int index = i;
-            LinearLayout item = vertical();
-            item.setGravity(Gravity.CENTER);
-            item.setPadding(dp(4), dp(4), dp(4), dp(4));
-            TextView glyph = text(symbols[i], 19, selectedTab == i ? TEXT : MUTED, true);
-            glyph.setGravity(Gravity.CENTER);
-            TextView label = text(labels[i], 9, selectedTab == i ? SILVER : MUTED, true);
-            label.setLetterSpacing(0.08f);
-            label.setGravity(Gravity.CENTER);
-            item.addView(glyph);
-            item.addView(label, margin(0, 2, 0, 0));
-            if (selectedTab == i) item.setBackground(rounded(PANEL_2, 13, LINE, 1));
-            item.setOnClickListener(v -> {
-                selectedTab = index;
-                renderPage();
-            });
-            nav.addView(item, new LinearLayout.LayoutParams(0, dp(54), 1f));
-        }
+        nav.setBackground(rounded(Color.rgb(13, 14, 19), 18, BORDER, 1));
+        nav.setElevation(dp(10));
+        nav.addView(navItem("⌂", "Home", TAB_HOME), navWeight());
+        nav.addView(navItem("▦", "Tools", TAB_TOOLS), navWeight());
+        nav.addView(navItem("◷", "Activity", TAB_ACTIVITY), navWeight());
+        nav.addView(navItem("⚙", "Settings", TAB_SETTINGS), navWeight());
         return nav;
     }
 
-    private void renderPage() {
-        if (pageHost == null) return;
-        pageHost.removeAllViews();
-        pairingCodeView = null;
-        pairingMetaView = null;
-        sessionTimerView = null;
-        sessionStatusView = null;
-        sessionBannerView = null;
-        homeBatteryView = null;
-        homeStorageView = null;
-        homeMemoryView = null;
-        homeNetworkView = null;
-        addHeader();
-        if (selectedTab == TAB_HOME) renderHome();
-        else if (selectedTab == TAB_DEVICE) renderDevicePage();
-        else if (selectedTab == TAB_SESSIONS) renderSessionsPage();
-        else renderToolsPage();
-        rebuildNavigation();
+    private LinearLayout.LayoutParams navWeight() {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(58), 1f);
+        p.setMargins(dp(3), 0, dp(3), 0);
+        return p;
     }
 
-    private void rebuildNavigation() {
-        // Rebuild the bottom bar after a tab change without replacing the content scroll.
-        View root = (View) pageHost.getParent();
-        if (!(root instanceof ScrollView)) return;
-        View shell = root.getParent();
-        if (!(shell instanceof LinearLayout)) return;
-        LinearLayout layout = (LinearLayout) shell;
-        if (layout.getChildCount() >= 2) {
-            layout.removeViewAt(1);
-            layout.addView(buildBottomNavigation(), new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+    private View navItem(String icon, String label, int tab) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER);
+        boolean selected = currentTab == tab;
+        item.setBackground(rounded(selected ? Color.rgb(37, 38, 51) : Color.TRANSPARENT,
+                14, selected ? Color.rgb(74, 74, 99) : Color.TRANSPARENT, selected ? 1 : 0));
+        TextView glyph = text(icon, 20, selected ? SILVER : MUTED, true);
+        glyph.setGravity(Gravity.CENTER);
+        item.addView(glyph);
+        TextView title = text(label, 10, selected ? WHITE : MUTED, selected);
+        title.setGravity(Gravity.CENTER);
+        item.addView(title);
+        item.setClickable(true);
+        item.setOnClickListener(v -> {
+            currentTab = tab;
+            renderPage();
+            haptic(v);
+        });
+        return item;
+    }
+
+    private void renderPage() {
+        sessionTimerView = null;
+        pairingCountdownView = null;
+        pageContainer.removeAllViews();
+        navContainer.removeAllViews();
+        navContainer.addView(buildBottomNavigation(), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        addHeader();
+        switch (currentTab) {
+            case TAB_TOOLS: buildToolsPage(); break;
+            case TAB_ACTIVITY: buildActivityPage(); break;
+            case TAB_SETTINGS: buildSettingsPage(); break;
+            default: buildHomePage(); break;
         }
+        pageContainer.invalidate();
     }
 
     private void addHeader() {
-        LinearLayout row = horizontal();
+        LinearLayout row = row();
         row.setGravity(Gravity.CENTER_VERTICAL);
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.hugzzbotzx_logo);
         logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        logo.setBackground(rounded(Color.BLACK, 14, LINE, 1));
+        logo.setBackground(rounded(PANEL_ALT, 13, BORDER, 1));
         logo.setClipToOutline(true);
-        row.addView(logo, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        row.addView(logo, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
-        LinearLayout brand = vertical();
+        LinearLayout brand = column();
         brand.setPadding(dp(11), 0, 0, 0);
-        brand.addView(text("HUGZZBOTZX", 16, TEXT, true));
-        TextView sub = text("PREMIUM DEVICE SUPPORT", 9, MUTED, true);
-        sub.setLetterSpacing(0.12f);
-        brand.addView(sub, margin(0, 3, 0, 0));
+        brand.addView(text("HUGZZBOTZX", 16, WHITE, true));
+        brand.addView(text("PREMIUM DEVICE SUPPORT", 9, MUTED, true));
         row.addView(brand, new LinearLayout.LayoutParams(0, -2, 1f));
-        TextView version = pill("V2.0  •  LOCAL", GREEN, Color.rgb(19, 38, 29));
-        row.addView(version);
-        pageHost.addView(row, margin(0, 0, 0, 23));
+        TextView local = pill("LOCAL • PRIVATE", PURPLE);
+        row.addView(local);
+        pageContainer.addView(row, margin(0, 0, 0, 23));
     }
 
-    private void renderHome() {
-        LinearLayout hero = vertical();
-        hero.setPadding(dp(19), dp(20), dp(19), dp(20));
-        GradientDrawable heroBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(49, 51, 60), Color.rgb(25, 27, 35), Color.rgb(16, 17, 23)});
-        heroBg.setCornerRadius(dp(22));
-        heroBg.setStroke(dp(1), Color.rgb(82, 85, 98));
-        hero.setBackground(heroBg);
-        TextView overline = text("PRIVATE SUPPORT CONSOLE  /  001", 9, SILVER, true);
-        overline.setLetterSpacing(0.14f);
-        hero.addView(overline);
-        TextView title = text("SUPPORT, WITH\nPERMISSION.", 27, TEXT, true);
-        title.setLineSpacing(dp(1), 1f);
-        hero.addView(title, margin(0, 11, 0, 9));
-        hero.addView(text("A premium toolkit for transparent, owner-approved device assistance.",
-                12, MUTED, false));
-        LinearLayout heroTags = horizontal();
-        heroTags.setGravity(Gravity.CENTER_VERTICAL);
-        heroTags.addView(pill("● CONSENT FIRST", GREEN, Color.rgb(19, 38, 29)));
-        heroTags.addView(pill("NO HIDDEN ACCESS", SILVER, Color.rgb(37, 38, 46)), margin(7, 0, 0, 0));
-        hero.addView(heroTags, margin(0, 16, 0, 0));
-        pageHost.addView(hero, margin(0, 0, 0, 19));
-
-        addSection("LIVE STATUS", "The current state of this app");
-        LinearLayout status = card();
-        sessionBannerView = text(sessionActive ? "●  LOCAL SESSION ACTIVE" : "●  NO ACTIVE SESSION",
-                11, sessionActive ? GREEN : MUTED, true);
-        sessionBannerView.setLetterSpacing(0.04f);
-        status.addView(sessionBannerView);
-        status.addView(text(sessionActive
-                        ? "A visible, consent-approved demo session is running on this device."
-                        : "Everything is idle. No device data is being shared.",
-                11, MUTED, false), margin(0, 6, 0, 0));
-        pageHost.addView(status, margin(0, 0, 0, 20));
-
-        addSection("DEVICE SNAPSHOT", "Live values read from this phone");
-        LinearLayout metricRow1 = horizontal();
-        metricRow1.addView(metricCard("BATTERY", batteryText(), "Power status", "◒"),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        metricRow1.addView(metricCard("STORAGE FREE", freeStorageText(), "Internal storage", "▤"),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        pageHost.addView(metricRow1, margin(0, 0, 0, 9));
-        LinearLayout metricRow2 = horizontal();
-        metricRow2.addView(metricCard("RAM AVAILABLE", availableMemoryText(), "System memory", "▥"),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        metricRow2.addView(metricCard("CONNECTION", networkText(), "Network state", "⌁"),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        pageHost.addView(metricRow2, margin(0, 0, 0, 20));
-
-        addPairingCard();
-        addSection("QUICK ACTIONS", "Useful actions on this device");
-        LinearLayout quick = card();
-        quick.addView(actionRow("↻", "Refresh device snapshot", "Update battery, memory and network values",
-                this::refreshAndNotify));
-        quick.addView(separator(), margin(0, 8, 0, 8));
-        quick.addView(actionRow("▣", "Copy device summary", "Copy a privacy-conscious report",
-                this::copyDeviceSummary));
-        quick.addView(separator(), margin(0, 8, 0, 8));
-        quick.addView(actionRow("✓", "Run diagnostics", "Check local device readiness",
-                () -> { runDiagnostics(); selectedTab = TAB_TOOLS; renderPage(); }));
-        pageHost.addView(quick, margin(0, 0, 0, 19));
-
-        LinearLayout trust = card();
-        trust.addView(text("BUILT AROUND OWNER CONTROL", 11, TEXT, true));
-        trust.addView(text("No silent monitoring • No camera or microphone capture • No screen recording • No remote input • No background control service.",
-                11, MUTED, false), margin(0, 7, 0, 0));
-        pageHost.addView(trust);
-        addFooter();
-    }
-
-    private void addPairingCard() {
-        addSection("PAIRING INVITE", "Local demo code • not a network connection");
-        LinearLayout box = card();
-        LinearLayout head = horizontal();
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        head.addView(text("TEMPORARY INVITE CODE", 10, MUTED, true),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        head.addView(pill("5 MIN EXPIRY", AMBER, Color.rgb(43, 34, 22)));
-        box.addView(head);
-        pairingCodeView = text(pairingCode == null ? "— — — — — —" : pairingCode,
-                30, TEXT, true);
-        pairingCodeView.setLetterSpacing(0.18f);
-        pairingCodeView.setGravity(Gravity.CENTER);
-        box.addView(pairingCodeView, margin(0, 13, 0, 4));
-        pairingMetaView = text(pairingMeta(), 10, MUTED, false);
-        pairingMetaView.setGravity(Gravity.CENTER);
-        box.addView(pairingMetaView, margin(0, 0, 0, 15));
-        LinearLayout buttons = horizontal();
-        buttons.addView(actionButton("GENERATE CODE", true, this::createPairingCode),
-                new LinearLayout.LayoutParams(0, dp(48), 1f));
-        buttons.addView(actionButton("COPY", false, this::copyPairingCode),
-                new LinearLayout.LayoutParams(0, dp(48), 1f));
-        box.addView(buttons);
-        box.addView(actionButton("REVOKE INVITE", false, this::revokePairingCode),
-                margin(0, 8, 0, 0));
-        pageHost.addView(box, margin(0, 0, 0, 20));
-        updatePairingViews();
-    }
-
-    private void renderDevicePage() {
-        pageHost.addView(text("DEVICE INTELLIGENCE", 24, TEXT, true), margin(0, 2, 0, 6));
-        pageHost.addView(text("A transparent overview of this phone. Only standard, non-sensitive system information is shown.",
-                12, MUTED, false), margin(0, 0, 0, 18));
-
-        addSection("IDENTITY", "Hardware and operating system");
-        LinearLayout identity = card();
-        addInfoRow(identity, "Manufacturer", safe(Build.MANUFACTURER));
-        addInfoRow(identity, "Brand", safe(Build.BRAND));
-        addInfoRow(identity, "Model", safe(Build.MODEL));
-        addInfoRow(identity, "Device family", safe(Build.DEVICE));
-        addInfoRow(identity, "Android version", Build.VERSION.RELEASE);
-        addInfoRow(identity, "API level", String.valueOf(Build.VERSION.SDK_INT));
-        addInfoRow(identity, "Build ID", safe(Build.ID));
-        addInfoRow(identity, "CPU ABI", joinAbis());
-        addInfoRow(identity, "Display", displaySummary());
-        addInfoRow(identity, "Language", Locale.getDefault().toLanguageTag());
-        addInfoRow(identity, "Time zone", TimeZone.getDefault().getID());
-        addInfoRow(identity, "App version", appVersion());
-        pageHost.addView(identity, margin(0, 0, 0, 19));
-
-        addSection("SYSTEM RESOURCES", "Usage values are refreshed when this page opens");
-        LinearLayout resources = card();
-        addInfoRow(resources, "Battery", batteryDetails());
-        addInfoRow(resources, "Internal storage", storageDetails());
-        addInfoRow(resources, "Memory (RAM)", memoryDetails());
-        addInfoRow(resources, "Network", networkDetails());
-        addInfoRow(resources, "Device uptime", uptimeText());
-        pageHost.addView(resources, margin(0, 0, 0, 19));
-
-        addSection("DEVICE SHORTCUTS", "Open Android's own settings");
-        LinearLayout shortcuts = card();
-        shortcuts.addView(actionRow("⚙", "Open system settings", "Manage the phone using Android settings",
-                () -> openSettings(Settings.ACTION_SETTINGS)));
-        shortcuts.addView(separator(), margin(0, 8, 0, 8));
-        shortcuts.addView(actionRow("▤", "App information", "View HugzzBotzX permissions and storage",
-                this::openAppInfo));
-        shortcuts.addView(separator(), margin(0, 8, 0, 8));
-        shortcuts.addView(actionRow("⇧", "Share device report", "Send a summary using Android share sheet",
-                this::shareDeviceReport));
-        pageHost.addView(shortcuts, margin(0, 0, 0, 18));
-        addFooter();
-    }
-
-    private void renderSessionsPage() {
-        pageHost.addView(text("SESSION CONTROL", 24, TEXT, true), margin(0, 2, 0, 6));
-        pageHost.addView(text("Every session is visible, local, and started only after the device owner approves it.",
-                12, MUTED, false), margin(0, 0, 0, 18));
-
-        LinearLayout stateCard = card();
-        stateCard.addView(pill(sessionActive ? "● SESSION ACTIVE" : "● SESSION IDLE",
-                sessionActive ? GREEN : MUTED,
-                sessionActive ? Color.rgb(19, 38, 29) : Color.rgb(35, 36, 43)));
-        sessionStatusView = text(sessionActive ? "Owner-approved local demo" : "No support session running",
-                18, TEXT, true);
-        stateCard.addView(sessionStatusView, margin(0, 12, 0, 4));
-        sessionTimerView = text(sessionActive ? formatDuration(SystemClock.elapsedRealtime() - sessionStartedAt)
-                : "00:00:00", 30, sessionActive ? GREEN : SILVER, true);
-        sessionTimerView.setLetterSpacing(0.08f);
-        stateCard.addView(sessionTimerView, margin(0, 0, 0, 6));
-        stateCard.addView(text("The timer runs only while this app remains in the foreground. Leaving the app ends the session automatically.",
-                11, MUTED, false));
-        pageHost.addView(stateCard, margin(0, 0, 0, 15));
-
-        LinearLayout controls = card();
-        controls.addView(text("SESSION ACTIONS", 10, MUTED, true));
-        controls.addView(actionButton("START WITH OWNER CONSENT", true, this::showConsentDialog),
-                margin(0, 12, 0, 0));
-        controls.addView(actionButton("END SESSION NOW", false,
-                () -> finishSession("Sesi dihentikan secara manual oleh pemilik perangkat.", true)),
-                margin(0, 8, 0, 0));
-        pageHost.addView(controls, margin(0, 0, 0, 19));
-
-        addSection("LOCAL AUDIT TRAIL", "Recent events stored only on this phone");
-        LinearLayout logs = card();
-        String[] entries = preferences.getString(KEY_LOGS, "").split("\n");
-        if (entries.length == 0 || (entries.length == 1 && entries[0].isEmpty())) {
-            logs.addView(text("No activity recorded yet.", 12, MUTED, false));
+    private void buildHomePage() {
+        addEyebrow("CONTROL CENTER / OVERVIEW");
+        LinearLayout hero = card(true);
+        LinearLayout top = row();
+        top.addView(text("SUPPORT CONSOLE", 10, MUTED, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        top.addView(pill(sessionActive ? "SESSION ACTIVE" : "SYSTEM READY",
+                sessionActive ? GREEN : PURPLE));
+        hero.addView(top);
+        hero.addView(text("Support, with\npermission.", 29, WHITE, true), margin(0, 15, 0, 8));
+        hero.addView(text("A premium workspace to inspect this device, prepare a support invitation, and manage transparent help sessions.",
+                13, MUTED, false), margin(0, 0, 0, 16));
+        TextView status = text(sessionActive ? "●  DEMO SESSION IS VISIBLE ON THIS DEVICE"
+                : "●  NO SUPPORT SESSION IS RUNNING", 10,
+                sessionActive ? GREEN : MUTED, true);
+        hero.addView(status, margin(0, 0, 0, 13));
+        if (sessionActive) {
+            sessionTimerView = text("Durasi sesi: " + formatDuration(
+                    (SystemClock.elapsedRealtime() - sessionStartedAt) / 1000L), 12, GREEN, true);
+            hero.addView(sessionTimerView, margin(0, 0, 0, 12));
+            addButton(hero, "END SUPPORT SESSION", false, v -> endSession());
         } else {
-            int count = Math.min(entries.length, 30);
-            for (int i = 0; i < count; i++) {
-                TextView entry = text("•  " + entries[i], 11, i == 0 ? TEXT : MUTED, i == 0);
-                entry.setLineSpacing(dp(3), 1f);
-                logs.addView(entry, margin(0, i == 0 ? 0 : 8, 0, 0));
-                if (i < count - 1) logs.addView(separator(), margin(0, 8, 0, 0));
+            addButton(hero, "START SESSION WITH CONSENT", true, v -> showConsentDialog());
+        }
+        pageContainer.addView(hero, margin(0, 0, 0, 19));
+
+        addSection("LIVE DEVICE SNAPSHOT", "This phone only");
+        LinearLayout stats = row();
+        int currentBattery = batteryPercent();
+        stats.addView(metricCard("BATTERY", currentBattery >= 0 ? currentBattery + "%" : "—",
+                batteryStatus()), metricWeight());
+        stats.addView(metricCard("STORAGE", storageFreeShort(), "Available"), metricWeight());
+        stats.addView(metricCard("MEMORY", memoryFreeShort(), "RAM free"), metricWeight());
+        pageContainer.addView(stats, margin(0, 0, 0, 19));
+
+        addSection("DEVICE OVERVIEW", "Live system details");
+        LinearLayout device = card(false);
+        addInfoRow(device, "Device", deviceName());
+        addInfoRow(device, "Android", Build.VERSION.RELEASE + " • API " + Build.VERSION.SDK_INT);
+        addInfoRow(device, "Network", networkLabel());
+        addInfoRow(device, "Display", displayResolution());
+        addInfoRow(device, "Uptime", uptimeLabel());
+        pageContainer.addView(device, margin(0, 0, 0, 19));
+
+        addSection("QUICK ACTIONS", "Useful shortcuts");
+        LinearLayout quick = card(false);
+        addButton(quick, "OPEN DEVICE DIAGNOSTICS", true, v -> navigate(TAB_TOOLS));
+        addButton(quick, "VIEW ACTIVITY HISTORY", false, v -> navigate(TAB_ACTIVITY));
+        addButton(quick, "EXPORT DEVICE REPORT", false, v -> shareReport());
+        pageContainer.addView(quick, margin(0, 0, 0, 18));
+
+        LinearLayout note = card(false);
+        note.addView(text("BUILT AROUND OWNER CONTROL", 11, SILVER, true));
+        note.addView(text("This version is a local device-support dashboard. Pairing codes are demo invitations only; no remote connection or hidden monitoring is performed.",
+                12, MUTED, false), margin(0, 7, 0, 0));
+        pageContainer.addView(note);
+        addFooter();
+    }
+
+    private void buildToolsPage() {
+        addEyebrow("TOOLS / DEVICE HEALTH");
+        addPageTitle("Tools & diagnostics", "Useful utilities for the device running HugzzBotzX.");
+
+        LinearLayout invite = card(true);
+        invite.addView(text("DEMO INVITATION • LOCAL ONLY", 10, PURPLE, true));
+        invite.addView(text("One-time pairing code", 19, WHITE, true), margin(0, 9, 0, 4));
+        TextView code = text(TextUtils.isEmpty(pairingCode) ? "— — — — — —" : spacedCode(pairingCode),
+                30, SILVER, true);
+        code.setLetterSpacing(0.13f);
+        invite.addView(code, margin(0, 9, 0, 4));
+        pairingCountdownView = text("Create a demo code to begin.", 11, MUTED, false);
+        invite.addView(pairingCountdownView, margin(0, 0, 0, 13));
+        LinearLayout inviteButtons = row();
+        inviteButtons.addView(button("GENERATE", true, v -> createPairingCode()),
+                new LinearLayout.LayoutParams(0, dp(48), 1f));
+        inviteButtons.addView(button("COPY", false, v -> copyPairingCode()),
+                new LinearLayout.LayoutParams(0, dp(48), 1f));
+        LinearLayout.LayoutParams second = (LinearLayout.LayoutParams) inviteButtons.getChildAt(1).getLayoutParams();
+        second.setMargins(dp(8), 0, 0, 0);
+        inviteButtons.getChildAt(1).setLayoutParams(second);
+        invite.addView(inviteButtons);
+        addButton(invite, "SHARE INVITATION", false, v -> sharePairingCode());
+        invite.addView(text("Important: this is a local demo code. It does not authenticate or connect a second device.",
+                10, ORANGE, false), margin(0, 10, 0, 0));
+        pageContainer.addView(invite, margin(0, 0, 0, 19));
+
+        addSection("DIAGNOSTIC REPORT", "Read-only information");
+        LinearLayout diagnostic = card(false);
+        addInfoRow(diagnostic, "Manufacturer", Build.MANUFACTURER);
+        addInfoRow(diagnostic, "Model", Build.MODEL);
+        addInfoRow(diagnostic, "Android build", Build.DISPLAY);
+        addInfoRow(diagnostic, "Security patch", securityPatch());
+        addInfoRow(diagnostic, "Battery", batterySummary());
+        addInfoRow(diagnostic, "Storage", storageSummary());
+        addInfoRow(diagnostic, "Memory", memorySummary());
+        addInfoRow(diagnostic, "Network", networkLabel());
+        addInfoRow(diagnostic, "Screen", displayResolution());
+        addInfoRow(diagnostic, "Device uptime", uptimeLabel());
+        addInfoRow(diagnostic, "App version", appVersion());
+        addButton(diagnostic, "REFRESH DIAGNOSTICS", true, v -> {
+            appendLog("Device diagnostics refreshed");
+            renderPage();
+            toast("Diagnostics refreshed");
+        });
+        addButton(diagnostic, "EXPORT REPORT", false, v -> shareReport());
+        pageContainer.addView(diagnostic, margin(0, 0, 0, 19));
+
+        addSection("PRIVACY CHECK", "App capability summary");
+        LinearLayout privacy = card(false);
+        addCheckRow(privacy, "No camera or microphone access");
+        addCheckRow(privacy, "No screen recording or screenshots");
+        addCheckRow(privacy, "No Accessibility Service or remote input");
+        addCheckRow(privacy, "No message, contact, or file collection");
+        addCheckRow(privacy, "No hidden background monitoring");
+        addCheckRow(privacy, "No Internet permission in this build");
+        pageContainer.addView(privacy);
+        addFooter();
+    }
+
+    private void buildActivityPage() {
+        addEyebrow("ACTIVITY / LOCAL HISTORY");
+        addPageTitle("Activity history", "A local record of actions performed inside this app.");
+        LinearLayout actions = row();
+        TextView count = text(activityLog.size() + " EVENTS SAVED", 10, MUTED, true);
+        actions.addView(count, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView export = text("EXPORT REPORT  ↗", 10, SILVER, true);
+        export.setPadding(dp(10), dp(8), dp(10), dp(8));
+        export.setBackground(rounded(PANEL_ALT, 12, BORDER, 1));
+        export.setOnClickListener(v -> shareReport());
+        actions.addView(export);
+        pageContainer.addView(actions, margin(0, 0, 0, 12));
+
+        LinearLayout logCard = card(false);
+        if (activityLog.isEmpty()) {
+            logCard.addView(text("No activity yet", 16, WHITE, true));
+            logCard.addView(text("When you create a demo invitation, refresh diagnostics, or start/end a consent session, the event will appear here.",
+                    12, MUTED, false), margin(0, 7, 0, 0));
+        } else {
+            int shown = Math.min(activityLog.size(), 40);
+            for (int i = 0; i < shown; i++) {
+                String item = activityLog.get(i);
+                LinearLayout eventRow = row();
+                TextView dot = text("●", 11, i == 0 ? PURPLE : MUTED, true);
+                eventRow.addView(dot, new LinearLayout.LayoutParams(dp(18), -2));
+                TextView event = text(item, 12, i == 0 ? WHITE : MUTED, i == 0);
+                event.setLineSpacing(dp(2), 1f);
+                eventRow.addView(event, new LinearLayout.LayoutParams(0, -2, 1f));
+                logCard.addView(eventRow, margin(0, 0, 0, 12));
+                if (i < shown - 1) logCard.addView(divider(), margin(dp(18), 0, 0, 12));
             }
         }
-        logs.addView(actionButton("CLEAR LOCAL HISTORY", false, this::confirmClearLogs),
-                margin(0, 14, 0, 0));
-        pageHost.addView(logs, margin(0, 0, 0, 18));
+        pageContainer.addView(logCard, margin(0, 0, 0, 14));
+        addButton(pageContainer, "CLEAR LOCAL HISTORY", false, v -> confirmClearHistory());
+        pageContainer.addView(text("History is stored on this phone in the app's private preferences. It is not uploaded.",
+                11, MUTED, false), margin(2, 10, 2, 0));
         addFooter();
     }
 
-    private void renderToolsPage() {
-        pageHost.addView(text("TOOLS & SECURITY", 24, TEXT, true), margin(0, 2, 0, 6));
-        pageHost.addView(text("Diagnostics, reports, shortcuts, and privacy controls.",
-                12, MUTED, false), margin(0, 0, 0, 18));
+    private void buildSettingsPage() {
+        addEyebrow("SETTINGS / APP CONTROL");
+        addPageTitle("Settings", "Manage local app data and review how this build works.");
 
-        addSection("DIAGNOSTIC CENTER", "Checks run on this phone only");
-        LinearLayout diagnostic = card();
-        diagnostic.addView(text("SYSTEM HEALTH CHECK", 13, TEXT, true));
-        diagnostic.addView(text("Inspect battery, free storage, available memory, network state, and app permission footprint.",
-                11, MUTED, false), margin(0, 6, 0, 13));
-        diagnostic.addView(actionButton("RUN DIAGNOSTICS", true, () -> {
-            runDiagnostics();
+        LinearLayout appearance = card(false);
+        appearance.addView(text("EXPERIENCE", 10, PURPLE, true));
+        addInfoRow(appearance, "Appearance", "Midnight • monochrome premium");
+        addInfoRow(appearance, "App version", appVersion());
+        addInfoRow(appearance, "Package", "com.hugzzbotzx.app");
+        addInfoRow(appearance, "Build mode", "Local / consent-first");
+        pageContainer.addView(appearance, margin(0, 0, 0, 15));
+
+        LinearLayout privacy = card(false);
+        privacy.addView(text("PRIVACY & PERMISSIONS", 10, PURPLE, true));
+        privacy.addView(text("HugzzBotzX V2 does not request sensitive permissions. Network state is read only to label the current connection type. No server connection is configured.",
+                12, MUTED, false), margin(0, 8, 0, 11));
+        addCheckRow(privacy, "Owner approval required to start a demo session");
+        addCheckRow(privacy, "Visible session state and stop control");
+        addCheckRow(privacy, "Pairing code is local demo data only");
+        addCheckRow(privacy, "Activity history stays on this device");
+        pageContainer.addView(privacy, margin(0, 0, 0, 15));
+
+        LinearLayout management = card(false);
+        management.addView(text("DATA & SUPPORT", 10, PURPLE, true));
+        addButton(management, "EXPORT DEVICE REPORT", true, v -> shareReport());
+        addButton(management, "CLEAR ACTIVITY HISTORY", false, v -> confirmClearHistory());
+        addButton(management, "RESET DEMO INVITATION", false, v -> {
+            pairingCode = "";
+            pairingExpiresAt = 0L;
+            appendLog("Demo invitation reset");
             renderPage();
-        }));
-        diagnostic.addView(separator(), margin(0, 13, 0, 11));
-        diagnostic.addView(text("LAST RESULT  •  " + lastDiagnosticsAt, 9, MUTED, true));
-        TextView result = text(lastDiagnostics, 11, TEXT, false);
-        result.setLineSpacing(dp(3), 1f);
-        diagnostic.addView(result, margin(0, 7, 0, 0));
-        pageHost.addView(diagnostic, margin(0, 0, 0, 19));
+            toast("Demo invitation reset");
+        });
+        addButton(management, "ABOUT HUGZZBOTZX", false, v -> showAboutDialog());
+        pageContainer.addView(management, margin(0, 0, 0, 15));
 
-        addSection("SYSTEM SHORTCUTS", "Handy links to Android settings");
-        LinearLayout settings = card();
-        settings.addView(actionRow("⚙", "Android settings", "System-wide settings", 
-                () -> openSettings(Settings.ACTION_SETTINGS)));
-        settings.addView(separator(), margin(0, 8, 0, 8));
-        settings.addView(actionRow("◒", "Battery settings", "Battery usage and power options",
-                () -> openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS)));
-        settings.addView(separator(), margin(0, 8, 0, 8));
-        settings.addView(actionRow("ⓘ", "HugzzBotzX app info", "Permissions, storage, and app details",
-                this::openAppInfo));
-        pageHost.addView(settings, margin(0, 0, 0, 19));
-
-        addSection("REPORT CENTER", "Copy or share a local support report");
-        LinearLayout reports = card();
-        reports.addView(actionButton("COPY DIAGNOSTIC REPORT", true, this::copyDiagnosticReport));
-        reports.addView(actionButton("SHARE REPORT", false, this::shareDeviceReport),
-                margin(0, 8, 0, 0));
-        pageHost.addView(reports, margin(0, 0, 0, 19));
-
-        addSection("HELP & PRIVACY", "How HugzzBotzX handles your device");
-        LinearLayout help = card();
-        help.addView(actionRow("?", "How pairing works", "Understand demo codes and limitations",
-                this::showPairingHelp));
-        help.addView(separator(), margin(0, 8, 0, 8));
-        help.addView(actionRow("✓", "Consent & safety", "See the boundaries of this build",
-                this::showPrivacyHelp));
-        help.addView(separator(), margin(0, 8, 0, 8));
-        help.addView(actionRow("✦", "About HugzzBotzX", "Version and app information",
-                this::showAbout));
-        pageHost.addView(help, margin(0, 0, 0, 18));
+        LinearLayout help = card(false);
+        help.addView(text("NEED HELP?", 10, PURPLE, true));
+        help.addView(text("This release is a local-only dashboard. Real remote assistance would require an authenticated service, clear approval on the device being assisted, a persistent visible indicator, and revocable access.",
+                12, MUTED, false), margin(0, 8, 0, 0));
+        pageContainer.addView(help);
         addFooter();
+    }
+
+    private void addEyebrow(String label) {
+        TextView tv = text(label, 10, PURPLE, true);
+        tv.setLetterSpacing(0.14f);
+        pageContainer.addView(tv, margin(0, 0, 0, 8));
+    }
+
+    private void addPageTitle(String title, String subtitle) {
+        pageContainer.addView(text(title, 27, WHITE, true), margin(0, 0, 0, 5));
+        pageContainer.addView(text(subtitle, 12, MUTED, false), margin(0, 0, 0, 18));
     }
 
     private void addSection(String title, String subtitle) {
-        LinearLayout section = vertical();
-        TextView label = text(title, 10, SILVER, true);
-        label.setLetterSpacing(0.15f);
-        section.addView(label);
-        section.addView(text(subtitle, 10, MUTED, false), margin(0, 3, 0, 0));
-        pageHost.addView(section, margin(0, 0, 0, 9));
+        LinearLayout line = row();
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        line.addView(text(title, 10, MUTED, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        line.addView(text(subtitle, 9, MUTED, false));
+        pageContainer.addView(line, margin(1, 0, 1, 9));
     }
 
-    private LinearLayout metricCard(String label, String value, String subtitle, String symbol) {
-        LinearLayout box = card();
-        LinearLayout top = horizontal();
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(text(label, 9, MUTED, true), new LinearLayout.LayoutParams(0, -2, 1f));
-        top.addView(text(symbol, 16, SILVER, true));
-        box.addView(top);
-        TextView valueView = text(value, 20, TEXT, true);
-        valueView.setSingleLine(true);
-        valueView.setEllipsize(TextUtils.TruncateAt.END);
-        box.addView(valueView, margin(0, 9, 0, 3));
-        box.addView(text(subtitle, 10, MUTED, false));
-        if ("BATTERY".equals(label)) homeBatteryView = valueView;
-        if ("STORAGE FREE".equals(label)) homeStorageView = valueView;
-        if ("RAM AVAILABLE".equals(label)) homeMemoryView = valueView;
-        if ("CONNECTION".equals(label)) homeNetworkView = valueView;
+    private LinearLayout metricCard(String label, String value, String helper) {
+        LinearLayout box = column();
+        box.setPadding(dp(11), dp(13), dp(10), dp(13));
+        box.setBackground(rounded(PANEL, 16, BORDER, 1));
+        box.addView(text(label, 9, MUTED, true));
+        box.addView(text(value, 18, WHITE, true), margin(0, 8, 0, 2));
+        box.addView(text(helper, 9, MUTED, false));
         return box;
     }
 
-    private LinearLayout card() {
-        LinearLayout box = vertical();
-        box.setPadding(dp(15), dp(15), dp(15), dp(15));
-        box.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(26, 28, 35), PANEL}));
-        ((GradientDrawable) box.getBackground()).setCornerRadius(dp(19));
-        ((GradientDrawable) box.getBackground()).setStroke(dp(1), LINE);
+    private LinearLayout.LayoutParams metricWeight() {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -2, 1f);
+        p.setMargins(dp(3), 0, dp(3), 0);
+        return p;
+    }
+
+    private void addInfoRow(LinearLayout parent, String label, String value) {
+        LinearLayout line = row();
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        TextView left = text(label, 11, MUTED, false);
+        line.addView(left, new LinearLayout.LayoutParams(dp(112), -2));
+        TextView right = text(TextUtils.isEmpty(value) ? "Not available" : value,
+                11, WHITE, true);
+        right.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        right.setMaxWidth(dp(190));
+        right.setEllipsize(TextUtils.TruncateAt.END);
+        right.setMaxLines(2);
+        line.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
+        parent.addView(line, margin(0, 0, 0, 12));
+    }
+
+    private void addCheckRow(LinearLayout parent, String label) {
+        LinearLayout line = row();
+        TextView check = text("✓", 14, GREEN, true);
+        line.addView(check, new LinearLayout.LayoutParams(dp(22), -2));
+        line.addView(text(label, 11, WHITE, false), new LinearLayout.LayoutParams(0, -2, 1f));
+        parent.addView(line, margin(0, 0, 0, 9));
+    }
+
+    private void addButton(LinearLayout parent, String label, boolean primary,
+                           View.OnClickListener listener) {
+        Button b = button(label, primary, listener);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(49));
+        p.topMargin = dp(8);
+        parent.addView(b, p);
+    }
+
+    private Button button(String label, boolean primary, View.OnClickListener listener) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setTextSize(10);
+        b.setAllCaps(false);
+        b.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        b.setLetterSpacing(0.06f);
+        b.setGravity(Gravity.CENTER);
+        b.setTextColor(primary ? Color.rgb(13, 14, 18) : WHITE);
+        b.setPadding(dp(10), dp(8), dp(10), dp(8));
+        b.setMinHeight(dp(48));
+        b.setBackground(rounded(primary ? SILVER : PANEL_ALT, 14,
+                primary ? SILVER : BORDER, 1));
+        b.setOnClickListener(v -> {
+            haptic(v);
+            if (listener != null) listener.onClick(v);
+        });
+        return b;
+    }
+
+    private TextView pill(String label, int color) {
+        TextView p = text(label, 9, color, true);
+        p.setPadding(dp(10), dp(7), dp(10), dp(7));
+        p.setBackground(rounded(Color.rgb(29, 29, 41), 30, BORDER, 1));
+        return p;
+    }
+
+    private LinearLayout card(boolean gradient) {
+        LinearLayout box = column();
+        box.setPadding(dp(17), dp(17), dp(17), dp(17));
+        if (gradient) {
+            GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    new int[]{Color.rgb(35, 37, 52), Color.rgb(17, 19, 27)});
+            bg.setCornerRadius(dp(22));
+            bg.setStroke(dp(1), Color.rgb(66, 68, 88));
+            box.setBackground(bg);
+        } else {
+            box.setBackground(rounded(PANEL, 19, BORDER, 1));
+        }
         return box;
     }
 
-    private LinearLayout actionRow(String symbol, String title, String subtitle, Runnable action) {
-        LinearLayout row = horizontal();
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView icon = text(symbol, 18, SILVER, true);
-        icon.setGravity(Gravity.CENTER);
-        icon.setBackground(rounded(Color.rgb(39, 41, 50), 12, LINE, 1));
-        row.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
-        LinearLayout labels = vertical();
-        labels.setPadding(dp(11), 0, dp(5), 0);
-        labels.addView(text(title, 12, TEXT, true));
-        labels.addView(text(subtitle, 10, MUTED, false), margin(0, 3, 0, 0));
-        row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1f));
-        TextView arrow = text("›", 23, MUTED, false);
-        row.addView(arrow);
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setBackground(ripple(rounded(Color.TRANSPARENT, 12, Color.TRANSPARENT, 0)));
-        row.setOnClickListener(v -> action.run());
-        return row;
+    private LinearLayout row() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        return box;
     }
 
-    private TextView actionButton(String label, boolean primary, Runnable action) {
-        TextView button = text(label, 10, primary ? Color.rgb(15, 16, 20) : TEXT, true);
-        button.setGravity(Gravity.CENTER);
-        button.setLetterSpacing(0.05f);
-        button.setPadding(dp(12), dp(13), dp(12), dp(13));
-        button.setMinHeight(dp(46));
-        button.setBackground(ripple(rounded(primary ? SILVER : Color.rgb(37, 39, 47), 13,
-                primary ? SILVER : LINE, 1)));
-        button.setClickable(true);
-        button.setFocusable(true);
-        button.setOnClickListener(v -> action.run());
-        return button;
+    private LinearLayout column() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        return box;
     }
 
-    private TextView pill(String label, int foreground, int background) {
-        TextView view = text(label, 9, foreground, true);
-        view.setLetterSpacing(0.07f);
-        view.setPadding(dp(10), dp(7), dp(10), dp(7));
-        view.setBackground(rounded(background, 30, Color.TRANSPARENT, 0));
-        return view;
-    }
-
-    private View separator() {
-        View line = new View(this);
-        line.setBackgroundColor(LINE);
-        line.setMinimumHeight(dp(1));
-        line.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-        return line;
-    }
-
-    private void addInfoRow(LinearLayout parent, String key, String value) {
-        LinearLayout row = horizontal();
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(8), 0, dp(8));
-        row.addView(text(key, 11, MUTED, false),
-                new LinearLayout.LayoutParams(0, -2, 0.9f));
-        TextView val = text(value, 11, TEXT, true);
-        val.setGravity(Gravity.RIGHT);
-        val.setMaxWidth(dp(190));
-        val.setEllipsize(TextUtils.TruncateAt.END);
-        row.addView(val, new LinearLayout.LayoutParams(0, -2, 1.1f));
-        parent.addView(row);
-        if (parent.getChildCount() > 1) parent.addView(separator());
-    }
-
-    private void addFooter() {
-        TextView footer = text("HUGZZBOTZX  •  PRIVATE BY DESIGN\nLOCAL BUILD 2.0  /  OWNER CONTROL FIRST",
-                9, MUTED, true);
-        footer.setGravity(Gravity.CENTER);
-        footer.setLetterSpacing(0.06f);
-        footer.setLineSpacing(dp(3), 1f);
-        pageHost.addView(footer, margin(0, 8, 0, 5));
-    }
-
-    private LinearLayout vertical() {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        return layout;
-    }
-
-    private LinearLayout horizontal() {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.HORIZONTAL);
-        return layout;
-    }
-
-    private TextView text(String value, int size, int color, boolean bold) {
+    private TextView text(String value, int sp, int color, boolean bold) {
         TextView view = new TextView(this);
         view.setText(value);
-        view.setTextSize(size);
         view.setTextColor(color);
+        view.setTextSize(sp);
         view.setIncludeFontPadding(true);
         view.setTypeface(Typeface.create("sans-serif", bold ? Typeface.BOLD : Typeface.NORMAL));
         return view;
     }
 
-    private GradientDrawable rounded(int color, int radiusDp, int strokeColor, int strokeDp) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(dp(radiusDp));
-        if (strokeDp > 0) drawable.setStroke(dp(strokeDp), strokeColor);
-        return drawable;
+    private View divider() {
+        View v = new View(this);
+        v.setBackgroundColor(BORDER);
+        return v;
     }
 
-    private android.graphics.drawable.Drawable ripple(GradientDrawable content) {
-        if (Build.VERSION.SDK_INT >= 21) {
-            return new android.graphics.drawable.RippleDrawable(
-                    android.content.res.ColorStateList.valueOf(Color.argb(50, 230, 232, 240)),
-                    content, null);
-        }
-        return content;
+    private GradientDrawable rounded(int color, int radiusDp, int strokeColor, int strokeDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(radiusDp));
+        if (strokeDp > 0) d.setStroke(dp(strokeDp), strokeColor);
+        return d;
     }
 
     private LinearLayout.LayoutParams margin(int left, int top, int right, int bottom) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(dp(left), dp(top), dp(right), dp(bottom));
-        return params;
+        p.setMargins(dp(left), dp(top), dp(right), dp(bottom));
+        return p;
     }
 
-    private int dp(float value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+    private void addFooter() {
+        TextView footer = text("HUGZZBOTZX  •  PRIVATE BY DESIGN\nV2.0 PREMIUM / LOCAL BUILD",
+                9, MUTED, true);
+        footer.setGravity(Gravity.CENTER);
+        footer.setLineSpacing(dp(3), 1f);
+        pageContainer.addView(footer, margin(0, 23, 0, 3));
     }
 
-    private String safe(String value) {
-        return value == null || value.trim().isEmpty() ? "Unknown" : value;
-    }
-
-    private String joinAbis() {
-        if (Build.SUPPORTED_ABIS == null || Build.SUPPORTED_ABIS.length == 0) return "Unknown";
-        StringBuilder out = new StringBuilder();
-        for (String abi : Build.SUPPORTED_ABIS) {
-            if (out.length() > 0) out.append(", ");
-            out.append(abi);
-        }
-        return out.toString();
-    }
-
-    private String appVersion() {
-        try {
-            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
-            return info.versionName == null ? "2.0.0" : info.versionName;
-        } catch (Exception ignored) {
-            return "2.0.0";
-        }
-    }
-
-    private String displaySummary() {
-        DisplayMetrics metrics = getResources().getDisplayMetrics();
-        return metrics.widthPixels + " × " + metrics.heightPixels + " px / "
-                + String.format(Locale.getDefault(), "%.1f", metrics.density) + "x";
-    }
-
-    private String batteryText() {
-        Intent battery = batteryIntent();
-        if (battery == null) return "N/A";
-        int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-        int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
-        if (level < 0 || scale <= 0) return "N/A";
-        return Math.round(level * 100f / scale) + "%";
-    }
-
-    private String batteryDetails() {
-        Intent battery = batteryIntent();
-        if (battery == null) return "Not available";
-        StringBuilder result = new StringBuilder(batteryText());
-        int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
-        String state = "Unknown";
-        if (status == BatteryManager.BATTERY_STATUS_CHARGING) state = "Charging";
-        else if (status == BatteryManager.BATTERY_STATUS_FULL) state = "Full";
-        else if (status == BatteryManager.BATTERY_STATUS_DISCHARGING) state = "Discharging";
-        else if (status == BatteryManager.BATTERY_STATUS_NOT_CHARGING) state = "Not charging";
-        result.append(" • ").append(state);
-        int temp = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
-        if (temp > 0) result.append(" • ").append(String.format(Locale.getDefault(), "%.1f°C", temp / 10f));
-        return result.toString();
-    }
-
-    private Intent batteryIntent() {
-        try {
-            return registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private String freeStorageText() {
-        try {
-            StatFs stat = new StatFs(Environment.getDataDirectory().getPath());
-            return formatBytes(stat.getAvailableBytes());
-        } catch (Exception ignored) {
-            return "N/A";
-        }
-    }
-
-    private String storageDetails() {
-        try {
-            StatFs stat = new StatFs(Environment.getDataDirectory().getPath());
-            return formatBytes(stat.getAvailableBytes()) + " free / " + formatBytes(stat.getTotalBytes());
-        } catch (Exception ignored) {
-            return "Not available";
-        }
-    }
-
-    private String availableMemoryText() {
-        ActivityManager.MemoryInfo info = memoryInfo();
-        return info == null ? "N/A" : formatBytes(info.availMem);
-    }
-
-    private String memoryDetails() {
-        ActivityManager.MemoryInfo info = memoryInfo();
-        if (info == null) return "Not available";
-        return formatBytes(info.availMem) + " available / " + formatBytes(info.totalMem);
-    }
-
-    private ActivityManager.MemoryInfo memoryInfo() {
-        try {
-            ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
-            if (manager == null) return null;
-            ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
-            manager.getMemoryInfo(info);
-            return info;
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private String networkText() {
-        String details = networkDetails();
-        if (details.startsWith("Connected")) return details.replace("Connected • ", "");
-        return details;
-    }
-
-    private String networkDetails() {
-        try {
-            ConnectivityManager manager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
-            if (manager == null) return "Not available";
-            Network active = manager.getActiveNetwork();
-            if (active == null) return "Offline";
-            NetworkCapabilities caps = manager.getNetworkCapabilities(active);
-            if (caps == null) return "Connected • type unknown";
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return "Connected • Wi-Fi";
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return "Connected • Mobile data";
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return "Connected • Ethernet";
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return "Connected • VPN";
-            return "Connected • Other network";
-        } catch (Exception ignored) {
-            return "Network state unavailable";
-        }
-    }
-
-    private String uptimeText() {
-        long millis = SystemClock.elapsedRealtime();
-        long seconds = millis / 1000;
-        long days = seconds / 86400;
-        long hours = (seconds % 86400) / 3600;
-        long minutes = (seconds % 3600) / 60;
-        return days + "d " + hours + "h " + minutes + "m";
-    }
-
-    private String formatBytes(long bytes) {
-        if (bytes < 0) return "N/A";
-        double value = bytes;
-        String[] units = {"B", "KB", "MB", "GB", "TB"};
-        int index = 0;
-        while (value >= 1024 && index < units.length - 1) {
-            value /= 1024;
-            index++;
-        }
-        return String.format(Locale.getDefault(), index == 0 ? "%.0f %s" : "%.1f %s", value, units[index]);
-    }
-
-    private String pairingMeta() {
-        if (pairingCode == null) return "Generate a demo code to display it here.";
-        long remaining = pairingExpiresAt - System.currentTimeMillis();
-        if (remaining <= 0) return "This demo code has expired. Generate another one.";
-        long seconds = (remaining + 999) / 1000;
-        return "Local demo only • expires in " + (seconds / 60) + ":"
-                + String.format(Locale.US, "%02d", seconds % 60) + " • no remote connection";
-    }
-
-    private void updatePairingViews() {
-        if (pairingCode != null && System.currentTimeMillis() >= pairingExpiresAt) {
-            pairingCode = null;
-            pairingExpiresAt = 0;
-        }
-        if (pairingCodeView != null) pairingCodeView.setText(pairingCode == null ? "— — — — — —" : pairingCode);
-        if (pairingMetaView != null) pairingMetaView.setText(pairingMeta());
-    }
-
-    private void createPairingCode() {
-        int value = new SecureRandom().nextInt(900000) + 100000;
-        pairingCode = String.format(Locale.US, "%06d", value);
-        pairingExpiresAt = System.currentTimeMillis() + PAIRING_VALID_MS;
-        addLog("Temporary local demo invite generated (5 min)");
-        updatePairingViews();
-        toast("Demo invite created. It is not a network pairing token.");
-    }
-
-    private void copyPairingCode() {
-        updatePairingViews();
-        if (pairingCode == null) {
-            toast("Generate a new demo code first.");
-            return;
-        }
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(ClipData.newPlainText("HugzzBotzX demo code", pairingCode));
-            toast("Demo code copied.");
-        }
-    }
-
-    private void revokePairingCode() {
-        pairingCode = null;
-        pairingExpiresAt = 0;
-        addLog("Temporary local demo invite revoked");
-        updatePairingViews();
-        toast("Demo invite revoked.");
+    private void navigate(int tab) {
+        currentTab = tab;
+        renderPage();
     }
 
     private void showConsentDialog() {
-        if (sessionActive) {
-            toast("A local demo session is already active.");
-            return;
-        }
         new AlertDialog.Builder(this)
-                .setTitle("Owner consent required")
-                .setMessage("You are about to start a visible local demo session on THIS phone. No screen, camera, microphone, messages, files, or keystrokes will be captured or shared. This build has no remote-control connection. The session ends when you tap END or leave this app.")
+                .setTitle("Start a support demo session?")
+                .setMessage("Please confirm that you are the owner or have permission to use this device. This starts a visible local demo timer only. No screen, camera, microphone, files, messages, notifications, or keyboard input are shared. You can end the session at any time.")
                 .setNegativeButton("CANCEL", (dialog, which) -> dialog.dismiss())
                 .setPositiveButton("I AGREE — START", (dialog, which) -> startSession())
                 .show();
     }
 
     private void startSession() {
+        if (sessionActive) return;
         sessionActive = true;
         sessionStartedAt = SystemClock.elapsedRealtime();
-        addLog("Owner-approved local demo session started");
+        appendLog("Support demo session started with owner consent");
         renderPage();
-        toast("Local demo session started.");
+        toast("Visible demo session started");
     }
 
-    private void finishSession(String reason, boolean updateScreen) {
+    private void endSession() {
         if (!sessionActive) {
-            if (updateScreen) toast("No active session.");
+            toast("No active session");
             return;
         }
-        long duration = Math.max(0, SystemClock.elapsedRealtime() - sessionStartedAt);
+        long seconds = Math.max(0L, (SystemClock.elapsedRealtime() - sessionStartedAt) / 1000L);
         sessionActive = false;
-        sessionStartedAt = 0;
-        addLog(reason + " Duration: " + formatDuration(duration));
-        if (updateScreen) {
-            renderPage();
-            toast("Session ended.");
+        sessionStartedAt = 0L;
+        appendLog("Support demo session ended • duration " + formatDuration(seconds));
+        renderPage();
+        toast("Session ended");
+    }
+
+    private void createPairingCode() {
+        pairingCode = String.format(Locale.US, "%06d", secureRandom.nextInt(900000) + 100000);
+        pairingExpiresAt = System.currentTimeMillis() + 5L * 60L * 1000L;
+        appendLog("Local demo invitation generated");
+        renderPage();
+        toast("Demo invitation generated");
+    }
+
+    private boolean isPairingCodeValid() {
+        if (TextUtils.isEmpty(pairingCode)) {
+            toast("Generate a demo code first");
+            return false;
+        }
+        if (System.currentTimeMillis() >= pairingExpiresAt) {
+            toast("Demo code expired — generate a new one");
+            return false;
+        }
+        return true;
+    }
+
+    private void copyPairingCode() {
+        if (!isPairingCodeValid()) return;
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(ClipData.newPlainText("HugzzBotzX demo code", pairingCode));
+            appendLog("Demo invitation copied to clipboard");
+            toast("Demo code copied");
+        } else {
+            toast("Clipboard unavailable");
         }
     }
 
-    private String formatDuration(long millis) {
-        long seconds = millis / 1000;
-        long hours = seconds / 3600;
-        long minutes = (seconds % 3600) / 60;
-        long secs = seconds % 60;
-        return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, secs);
+    private void sharePairingCode() {
+        if (!isPairingCodeValid()) return;
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "HugzzBotzX demo invitation");
+        send.putExtra(Intent.EXTRA_TEXT, "HugzzBotzX local demo invitation\nCode: " + pairingCode
+                + "\nThis is a demo code only. It does not connect to or control another device.");
+        appendLog("Demo invitation shared using Android share sheet");
+        startActivity(Intent.createChooser(send, "Share demo invitation"));
     }
 
-    private void addLog(String message) {
-        String stamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
-        String line = stamp + "  |  " + message.replace('\n', ' ');
-        String old = preferences.getString(KEY_LOGS, "");
-        String[] lines = old.isEmpty() ? new String[0] : old.split("\n");
-        StringBuilder updated = new StringBuilder(line);
-        for (int i = 0; i < Math.min(lines.length, 29); i++) {
-            updated.append('\n').append(lines[i]);
-        }
-        preferences.edit().putString(KEY_LOGS, updated.toString()).apply();
-    }
-
-    private void confirmClearLogs() {
+    private void confirmClearHistory() {
         new AlertDialog.Builder(this)
-                .setTitle("Clear local history?")
-                .setMessage("This removes the activity log stored by HugzzBotzX on this phone. It does not affect Android system logs.")
-                .setNegativeButton("CANCEL", null)
-                .setPositiveButton("CLEAR", (dialog, which) -> {
-                    preferences.edit().remove(KEY_LOGS).apply();
+                .setTitle("Clear local activity history?")
+                .setMessage("This permanently removes the event list stored by HugzzBotzX on this phone.")
+                .setNegativeButton("CANCEL", (dialog, which) -> dialog.dismiss())
+                .setPositiveButton("CLEAR HISTORY", (dialog, which) -> {
+                    activityLog.clear();
+                    getSharedPreferences("hugzzbotzx_state", MODE_PRIVATE).edit()
+                            .putString("activity_log", "[]").apply();
                     renderPage();
-                    toast("Local history cleared.");
+                    toast("Local history cleared");
                 }).show();
     }
 
-    private void runDiagnostics() {
-        List<String> checks = new ArrayList<>();
-        checks.add("✓ Battery reading: " + batteryDetails());
-        try {
-            StatFs stat = new StatFs(Environment.getDataDirectory().getPath());
-            checks.add("✓ Storage available: " + formatBytes(stat.getAvailableBytes()));
-        } catch (Exception e) {
-            checks.add("! Storage reading unavailable");
-        }
-        ActivityManager.MemoryInfo memory = memoryInfo();
-        checks.add(memory == null ? "! Memory reading unavailable"
-                : "✓ Available RAM: " + formatBytes(memory.availMem));
-        checks.add("• Network: " + networkDetails());
-        checks.add("✓ Sensitive permissions requested: none");
-        checks.add("✓ Background/hidden service: not implemented");
-        checks.add("• Session: " + (sessionActive ? "local demo active" : "idle"));
-        StringBuilder result = new StringBuilder();
-        for (String check : checks) {
-            if (result.length() > 0) result.append('\n');
-            result.append(check);
-        }
-        lastDiagnostics = result.toString();
-        lastDiagnosticsAt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
-        preferences.edit()
-                .putString(KEY_DIAGNOSTICS, lastDiagnostics)
-                .putString(KEY_DIAGNOSTICS_AT, lastDiagnosticsAt)
-                .apply();
-        addLog("Local device diagnostics completed");
-    }
-
-    private String buildDeviceReport() {
-        return "HUGZZBOTZX — DEVICE SUMMARY\n"
-                + "Generated: " + DateFormat.getDateTimeInstance().format(new Date()) + "\n\n"
-                + "Manufacturer: " + safe(Build.MANUFACTURER) + "\n"
-                + "Brand: " + safe(Build.BRAND) + "\n"
-                + "Model: " + safe(Build.MODEL) + "\n"
-                + "Android: " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")\n"
-                + "CPU ABI: " + joinAbis() + "\n"
-                + "Display: " + displaySummary() + "\n"
-                + "Battery: " + batteryDetails() + "\n"
-                + "Storage: " + storageDetails() + "\n"
-                + "Memory: " + memoryDetails() + "\n"
-                + "Network: " + networkDetails() + "\n"
-                + "Uptime: " + uptimeText() + "\n\n"
-                + "Privacy: local system summary only. No unique device ID, messages, files, or screen content included.\n"
-                + "HugzzBotzX is local-only in this build; no remote connection is active.";
-    }
-
-    private String buildDiagnosticReport() {
-        return "HUGZZBOTZX — DIAGNOSTIC REPORT\n"
-                + "Generated: " + DateFormat.getDateTimeInstance().format(new Date()) + "\n\n"
-                + lastDiagnostics + "\n\n"
-                + buildDeviceReport();
-    }
-
-    private void copyDeviceSummary() {
-        copyText("Device summary", buildDeviceReport());
-    }
-
-    private void copyDiagnosticReport() {
-        copyText("Diagnostic report", buildDiagnosticReport());
-    }
-
-    private void copyText(String label, String value) {
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(ClipData.newPlainText(label, value));
-            toast(label + " copied.");
-        } else {
-            toast("Clipboard is unavailable.");
-        }
-    }
-
-    private void shareDeviceReport() {
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, "HugzzBotzX device support report");
-        send.putExtra(Intent.EXTRA_TEXT, buildDiagnosticReport());
-        try {
-            startActivity(Intent.createChooser(send, "Share support report"));
-        } catch (Exception ignored) {
-            toast("No compatible sharing app found.");
-        }
-    }
-
-    private void refreshAndNotify() {
-        refreshDeviceInfo();
-        toast("Device snapshot refreshed.");
-    }
-
-    private void refreshDeviceInfo() {
-        if (homeBatteryView != null) homeBatteryView.setText(batteryText());
-        if (homeStorageView != null) homeStorageView.setText(freeStorageText());
-        if (homeMemoryView != null) homeMemoryView.setText(availableMemoryText());
-        if (homeNetworkView != null) homeNetworkView.setText(networkText());
-        if (sessionTimerView != null && sessionActive) {
-            sessionTimerView.setText(formatDuration(SystemClock.elapsedRealtime() - sessionStartedAt));
-        }
-        updatePairingViews();
-    }
-
-    private void openSettings(String action) {
-        try {
-            startActivity(new Intent(action));
-        } catch (Exception ignored) {
-            try {
-                startActivity(new Intent(Settings.ACTION_SETTINGS));
-            } catch (Exception ignoredAgain) {
-                toast("Android settings could not be opened.");
-            }
-        }
-    }
-
-    private void openAppInfo() {
-        try {
-            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            intent.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
-        } catch (Exception ignored) {
-            toast("App information is unavailable.");
-        }
-    }
-
-    private void showPairingHelp() {
-        new AlertDialog.Builder(this)
-                .setTitle("About pairing codes")
-                .setMessage("The six-digit invite is generated locally with a secure random number and expires after five minutes. In this build it is a UI demonstration only: there is no backend, internet permission, device discovery, or remote connection. Do not treat this code as a real authentication credential.")
-                .setPositiveButton("GOT IT", null).show();
-    }
-
-    private void showPrivacyHelp() {
-        new AlertDialog.Builder(this)
-                .setTitle("Consent & privacy")
-                .setMessage("HugzzBotzX Premium 2.0 runs local utility functions only. It reads standard device facts such as model, Android version, battery, storage, available RAM, and network transport. Its only declared runtime-independent permission is ACCESS_NETWORK_STATE. It does not request Accessibility, Contacts, SMS, Location, Camera, Microphone, or screen-capture access. Session history is stored in this app's private preferences. A demo session ends when the app leaves the foreground.")
-                .setPositiveButton("UNDERSTOOD", null).show();
-    }
-
-    private void showAbout() {
+    private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("HugzzBotzX Premium")
-                .setMessage("Version 2.0.0\nPackage: com.hugzzbotzx.app\nBuild: Android Native / Java\nDesign: Obsidian Silver\n\nA transparent device-support dashboard. Current release is local-only and does not connect to or control other devices.")
-                .setPositiveButton("CLOSE", null).show();
+                .setMessage("Version " + appVersion() + "\n\nA transparent, consent-first device support dashboard. This build runs locally and does not contain remote-control or surveillance features.\n\nPackage: com.hugzzbotzx.app")
+                .setPositiveButton("CLOSE", (dialog, which) -> dialog.dismiss())
+                .show();
     }
 
-    private void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+    private void shareReport() {
+        StringBuilder report = new StringBuilder();
+        report.append("HUGZZBOTZX — DEVICE DIAGNOSTIC REPORT\n");
+        report.append("Generated: ").append(DateFormat.getDateTimeInstance().format(new Date())).append("\n\n");
+        report.append("DEVICE\n");
+        report.append("Manufacturer: ").append(Build.MANUFACTURER).append("\n");
+        report.append("Model: ").append(Build.MODEL).append("\n");
+        report.append("Android: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n");
+        report.append("Build: ").append(Build.DISPLAY).append("\n");
+        report.append("Security patch: ").append(securityPatch()).append("\n");
+        report.append("Screen: ").append(displayResolution()).append("\n\n");
+        report.append("STATUS\n");
+        report.append("Battery: ").append(batterySummary()).append("\n");
+        report.append("Storage: ").append(storageSummary()).append("\n");
+        report.append("Memory: ").append(memorySummary()).append("\n");
+        report.append("Network: ").append(networkLabel()).append("\n");
+        report.append("Uptime: ").append(uptimeLabel()).append("\n");
+        report.append("App version: ").append(appVersion()).append("\n\n");
+        report.append("PRIVACY\nThis build is local-only. It does not capture screen, camera, microphone, messages, notifications, files, or keystrokes. No remote session is configured.\n\n");
+        report.append("RECENT LOCAL EVENTS\n");
+        if (activityLog.isEmpty()) report.append("No events recorded.\n");
+        else for (int i = 0; i < Math.min(activityLog.size(), 30); i++) report.append("• ").append(activityLog.get(i)).append("\n");
+
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "HugzzBotzX device diagnostic report");
+        send.putExtra(Intent.EXTRA_TEXT, report.toString());
+        appendLog("Device diagnostic report exported via Android share sheet");
+        startActivity(Intent.createChooser(send, "Export device report"));
+    }
+
+    private void loadActivityLog() {
+        String saved = getSharedPreferences("hugzzbotzx_state", MODE_PRIVATE)
+                .getString("activity_log", "[]");
+        try {
+            JSONArray array = new JSONArray(saved);
+            for (int i = 0; i < array.length(); i++) activityLog.add(array.optString(i));
+        } catch (JSONException ignored) {
+            activityLog.clear();
+        }
+    }
+
+    private void appendLog(String event) {
+        String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                .format(new Date());
+        activityLog.add(0, time + "  •  " + event);
+        while (activityLog.size() > 60) activityLog.remove(activityLog.size() - 1);
+        JSONArray array = new JSONArray();
+        for (String item : activityLog) array.put(item);
+        getSharedPreferences("hugzzbotzx_state", MODE_PRIVATE).edit()
+                .putString("activity_log", array.toString()).apply();
+    }
+
+    private int batteryPercent() {
+        Intent battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (battery == null) return -1;
+        int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+        int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+        if (level < 0 || scale <= 0) return -1;
+        return Math.round(level * 100f / scale);
+    }
+
+    private String batteryStatus() {
+        Intent battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (battery == null) return "Unavailable";
+        int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+        if (status == BatteryManager.BATTERY_STATUS_CHARGING) return "Charging";
+        if (status == BatteryManager.BATTERY_STATUS_FULL) return "Full";
+        if (status == BatteryManager.BATTERY_STATUS_DISCHARGING) return "In use";
+        return "Standby";
+    }
+
+    private String batterySummary() {
+        Intent battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (battery == null) return "Unavailable";
+        int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+        int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+        int percent = (level >= 0 && scale > 0) ? Math.round(level * 100f / scale) : -1;
+        int temp = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
+        String value = percent >= 0 ? percent + "% • " + batteryStatus() : batteryStatus();
+        if (temp >= 0) value += String.format(Locale.getDefault(), " • %.1f°C", temp / 10f);
+        return value;
+    }
+
+    private String storageSummary() {
+        try {
+            StatFs stat = new StatFs(Environment.getDataDirectory().getPath());
+            return formatBytes(stat.getAvailableBytes()) + " free / " + formatBytes(stat.getTotalBytes());
+        } catch (Exception e) {
+            return "Unavailable";
+        }
+    }
+
+    private String storageFreeShort() {
+        try {
+            StatFs stat = new StatFs(Environment.getDataDirectory().getPath());
+            return formatBytesShort(stat.getAvailableBytes());
+        } catch (Exception e) { return "—"; }
+    }
+
+    private String memorySummary() {
+        try {
+            ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
+            manager.getMemoryInfo(info);
+            return formatBytes(info.availMem) + " free / " + formatBytes(info.totalMem);
+        } catch (Exception e) { return "Unavailable"; }
+    }
+
+    private String memoryFreeShort() {
+        try {
+            ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
+            manager.getMemoryInfo(info);
+            return formatBytesShort(info.availMem);
+        } catch (Exception e) { return "—"; }
+    }
+
+    private String networkLabel() {
+        try {
+            ConnectivityManager manager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (manager == null) return "Unavailable";
+            NetworkInfo info = manager.getActiveNetworkInfo();
+            if (info == null || !info.isConnected()) return "Offline";
+            if (info.getType() == ConnectivityManager.TYPE_WIFI) return "Wi-Fi connected";
+            if (info.getType() == ConnectivityManager.TYPE_MOBILE) return "Mobile data connected";
+            return "Connected • " + info.getTypeName();
+        } catch (SecurityException e) {
+            return "Permission unavailable";
+        } catch (Exception e) {
+            return "Unavailable";
+        }
+    }
+
+    private String displayResolution() {
+        int width = getResources().getDisplayMetrics().widthPixels;
+        int height = getResources().getDisplayMetrics().heightPixels;
+        float density = getResources().getDisplayMetrics().density;
+        return width + " × " + height + " px • " + String.format(Locale.getDefault(), "%.1fx", density);
+    }
+
+    private String uptimeLabel() {
+        long seconds = SystemClock.elapsedRealtime() / 1000L;
+        long days = seconds / 86400L;
+        long hours = (seconds % 86400L) / 3600L;
+        long minutes = (seconds % 3600L) / 60L;
+        if (days > 0) return days + "d " + hours + "h " + minutes + "m";
+        if (hours > 0) return hours + "h " + minutes + "m";
+        return minutes + "m";
+    }
+
+    private String securityPatch() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) return Build.VERSION.SECURITY_PATCH;
+        return "Not available";
+    }
+
+    private String deviceName() {
+        String manufacturer = Build.MANUFACTURER == null ? "Android" : Build.MANUFACTURER;
+        String model = Build.MODEL == null ? "Device" : Build.MODEL;
+        return manufacturer + " " + model;
+    }
+
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) { return "2.0.0"; }
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 0L) return "Unavailable";
+        if (bytes < 1024L) return bytes + " B";
+        double value = bytes;
+        String[] units = {"B", "KB", "MB", "GB", "TB"};
+        int index = 0;
+        while (value >= 1024.0 && index < units.length - 1) {
+            value /= 1024.0;
+            index++;
+        }
+        return String.format(Locale.getDefault(), "%.2f %s", value, units[index]);
+    }
+
+    private String formatBytesShort(long bytes) {
+        if (bytes < 0L) return "—";
+        double value = bytes;
+        String[] units = {"B", "K", "M", "G", "T"};
+        int index = 0;
+        while (value >= 1024.0 && index < units.length - 1) {
+            value /= 1024.0;
+            index++;
+        }
+        return String.format(Locale.getDefault(), "%.1f%s", value, units[index]);
+    }
+
+    private String formatDuration(long seconds) {
+        long hours = seconds / 3600L;
+        long minutes = (seconds % 3600L) / 60L;
+        long secs = seconds % 60L;
+        return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, secs);
+    }
+
+    private String spacedCode(String code) {
+        if (code == null || code.length() != 6) return code;
+        return code.substring(0, 3) + "  " + code.substring(3);
+    }
+
+    private void haptic(View v) {
+        if (v != null) v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+    }
+
+    private void toast(String value) {
+        Toast.makeText(this, value, Toast.LENGTH_SHORT).show();
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 }

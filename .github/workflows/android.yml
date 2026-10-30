@@ -1,4 +1,4 @@
-name: Build HugzzBotzX Premium APK
+name: Build HugzzBotzX APK
 
 on:
   push:
@@ -8,10 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    name: Build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -21,7 +25,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -35,16 +38,15 @@ jobs:
           gradle-version: '9.6.0'
 
       - name: Verify project configuration
-        run: gradle --no-daemon tasks --all
+        run: gradle --version && gradle --no-daemon tasks --all
 
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Upload debug APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HugzzBotzX-Premium-debug-apk
+          name: HugzzBotzX-v2-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-
