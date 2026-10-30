@@ -1,25 +1,26 @@
-# Feature map — HugzzBotzX Premium V2.0
+# HugzzBotzX Family V3.0 — Features and limitations
 
-| Screen | Feature | Behavior |
-|---|---|---|
-| Dashboard | Device identity | Reads manufacturer, model, Android version and API level from Android system APIs |
-| Dashboard | Battery card | Reads level and charging state from the sticky battery broadcast |
-| Dashboard | Storage card | Reads app-visible data partition capacity through `StatFs` |
-| Dashboard | RAM card | Reads available and total RAM through `ActivityManager.MemoryInfo` |
-| Dashboard | Network status | Reads active network type/status; no network payload is sent |
-| Dashboard | Display and uptime | Reads display metrics and elapsed boot time |
-| Tools | Demo invitation | Generates a random six-digit local code and expires it after five minutes |
-| Tools | Copy invitation | Copies the current unexpired code to Android clipboard |
-| Tools | Share invitation | Opens Android Sharesheet with a clear demo-only disclaimer |
-| Tools | Diagnostics refresh | Re-reads diagnostic data and records a local event |
-| Tools | Report export | Builds a text report and opens Android Sharesheet |
-| Activity | Event history | Persists up to 60 local events in private SharedPreferences |
-| Activity | Clear history | Requires confirmation, then deletes the local event list |
-| Session | Consent dialog | Requires the user to accept before the visible demo session starts |
-| Session | Timer and stop button | Shows elapsed local duration and ends immediately when requested |
-| Settings | Reset demo invitation | Removes the current local demo code |
-| Settings | About | Shows version and app scope |
+## Working features in this build
 
-## Explicitly not implemented
+- Premium light UI with lavender, pearl-white and soft pink accents.
+- User-supplied HugzzBotzX artwork used in the in-app header and Android launcher icon densities.
+- Live local device snapshot: battery, free storage, available RAM, device model and network transport.
+- Optional Android Usage Access flow and on-device daily app-usage report.
+- Configurable daily screen-time soft-goal threshold (1–5 hours). It is a reminder/report threshold, not an app blocker.
+- In-app focus timer (25 or 45 minutes) with stop control.
+- Flashlight on/off using Android Camera2 torch mode after runtime camera permission.
+- Slow SOS flash signal, limited to about one blink per second and automatically stopped after 10 seconds. It is not a rapid strobe.
+- Local activity history, local device report and Android share-sheet export.
+- Links to Android app permissions and Digital Wellbeing settings.
 
-No real remote pairing, remote input, screen viewing, camera/microphone capture, Accessibility Service, notification reading, file/message access, stealth background process, or hidden control. The demo pairing string is not a server credential and cannot contact another device.
+## Deliberate limitations
+
+This version operates only on the phone on which it is installed. It has no network permission, remote relay, parent account, child-device connection, remote flashlight command, remote app blocking, screen viewing, audio capture, or hidden monitoring. The second-device card explains the prerequisites and does not pretend to be connected.
+
+Android does not allow an ordinary app to silently or generally control another device. A real family service needs an authenticated parent account, a second app installed on the supervised phone, child-side disclosure and acceptance, encrypted transport, a visible active state and a reliable disconnect. Device-wide blocking or policy enforcement also requires supported Android supervision/enterprise enrollment and cannot be granted by an ordinary runtime permission.
+
+The app-usage report requires the user to explicitly enable Usage Access in Android Settings. The flashlight requires the user to grant Camera permission. Both permissions can be revoked in Android Settings.
+
+## Flash safety
+
+No turbo/high-frequency strobe mode is provided. Repetitive flashing can be unsafe for people with photosensitive epilepsy or discomfort. The included SOS is slow, short and automatically stopped. Avoid pointing the light at eyes or faces.

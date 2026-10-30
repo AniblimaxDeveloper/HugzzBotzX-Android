@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#08080B</color>
+    <color name="black">#27233A</color>
     <color name="white">#FFFFFF</color>
-    <color name="icon_bg">#08080B</color>
+    <color name="icon_bg">#F1EDFC</color>
 </resources>
