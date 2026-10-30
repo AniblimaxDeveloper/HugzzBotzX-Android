@@ -1,6 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#26324A</color>
-    <color name="white">#FFFFFF</color>
-    <color name="icon_bg">#EEF3FF</color>
+    <color name='ink'>#15132A</color>
+    <color name='paper'>#FFFDF8</color>
+    <color name='violet'>#6D4AFF</color>
+    <color name='pink'>#FF4FA3</color>
+    <color name='cyan'>#19C8FF</color>
+    <color name='yellow'>#FFD84D</color>
+    <color name='mint'>#39D9A4</color>
+    <color name='lavender'>#EEE8FF</color>
+    <color name='peach'>#FFE5D4</color>
+    <color name='sky'>#DDF6FF</color>
+    <color name='danger'>#FF4D6D</color>
 </resources>
