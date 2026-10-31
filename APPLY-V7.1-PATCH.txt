@@ -1,0 +1,15 @@
+HUGZZBOTZX V7.1 PATCH
+
+Use this patch only on a project that already contains HugzzBotzX V7.0.
+Extract the ZIP into the root of the existing repository (the folder containing app/, build.gradle and .git/).
+Do not extract inside app/ and do not delete .git/.
+
+Then run:
+  git status --short
+  git add -A
+  git commit -m "Upgrade HugzzBotzX V7.1 Live Device Management"
+  git push origin main
+
+For a full clean source project, use HugzzBotzX-V7.1-Full-Source.zip.
+
+V7.1 ADB pairing is an authorization-first helper. It copies commands for Termux; it does not silently run commands or create hidden remote access.
