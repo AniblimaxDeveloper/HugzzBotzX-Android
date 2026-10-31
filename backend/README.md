@@ -1,5 +1,11 @@
-# Backend integration scaffold (not deployed)
+# HugzzBotzX V8 backend boundary (not deployed)
 
-The V7 Android client keeps local data on-device. This directory documents the production backend boundary. A future backend should provide: authenticated user sessions, device enrollment with approval on both sides, revocable short-lived session tokens, consent receipts, message provider adapters, webhook signatures, rate limits, audit logs, database migrations and backups.
+The Android client is local-first. The following production components are not included or live in this source ZIP:
+- Google OAuth/OIDC verification and account recovery;
+- server-side role/permission enforcement;
+- cloud device enrollment and live multi-device sync;
+- real-time remote assistance/screen sharing;
+- official WhatsApp Business / Telegram message delivery;
+- webhook workers, rate limiting, durable database, migrations and server backups.
 
-No server URL, API key, OAuth client secret or database credential is included. The Android app only stores a user-supplied HTTPS webhook URL and encrypts optional provider tokens locally; it does not call the webhook in this build.
+A production deployment must use HTTPS, authenticate users server-side, issue short-lived revocable device/session tokens, record explicit target-device consent, validate webhook signatures, enforce opt-in/opt-out, throttle messaging and retain auditable logs. Never put provider secrets in the repository. Local encrypted token storage is not an active server integration.

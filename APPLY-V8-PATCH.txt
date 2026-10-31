@@ -1,0 +1,15 @@
+HugzzBotzX V8.0 overlay patch
+
+Extract this ZIP directly into your existing repository folder:
+
+  unzip -o /sdcard/Download/HugzzBotzX-V8-Patch.zip -d ~/projects/HugzzBotzX
+
+Then run:
+
+  cd ~/projects/HugzzBotzX
+  git status --short
+  git add -A
+  git commit -m "Upgrade HugzzBotzX V8 Ultimate System"
+  git push origin main
+
+Do not run git init and do not delete .git. The patch replaces project files but contains no .git directory.

@@ -12,13 +12,13 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 
 public class ReminderReceiver extends BroadcastReceiver {
-    private static final String CHANNEL_ID = "hugzz_v7_reminders";
+    private static final String CHANNEL_ID = "hugzz_v8_reminders";
     @Override public void onReceive(Context context, Intent intent) {
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "HugzzBotzX reminders", NotificationManager.IMPORTANCE_DEFAULT);
+            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "HugzzBotzX V8 reminders", NotificationManager.IMPORTANCE_DEFAULT);
             channel.setDescription("User-scheduled local reminders");
             manager.createNotificationChannel(channel);
         }

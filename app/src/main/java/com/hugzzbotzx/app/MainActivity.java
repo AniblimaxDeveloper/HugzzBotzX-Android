@@ -3,6 +3,8 @@ package com.hugzzbotzx.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.KeyguardManager;
+import android.os.PowerManager;
 import android.app.AlertDialog;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
@@ -35,6 +37,8 @@ import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
@@ -83,7 +87,7 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 
 /**
- * HugzzBotzX Ultimate System V7.1 — comic-style local device control and authorized diagnostics.
+ * HugzzBotzX Ultimate System V8.0 — comic command suite with local admin, privacy-first media and authorized diagnostics.
  * All control actions open Android's own settings UI or operate on this device.
  * ADB snippets are copied for the user to run in Termux after target-side authorization.
  */
@@ -121,6 +125,7 @@ public class MainActivity extends Activity {
     private static final int REQ_EXPORT_BACKUP = 707;
     private static final int REQ_IMPORT_BACKUP = 708;
     private static final int REQ_POST_NOTIFICATIONS = 709;
+    private static final int REQ_NOTIFICATION_PERMISSION_ONLY = 710;
     private Uri lastSelectedUri;
     private String lastSelectedMime = "application/octet-stream";
     private int pendingReminderMinutes = 0;
@@ -128,11 +133,13 @@ public class MainActivity extends Activity {
     private Runnable monitorRunnable;
     private TextView monitorReadout;
     private boolean monitorRunning = false;
+    private LocalVaultStore localVault;
 
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
-        prefs = getSharedPreferences("hugzz_v61", MODE_PRIVATE);
+        prefs = getSharedPreferences("hugzz_v61", MODE_PRIVATE); // Preserve V7.1 local preferences on upgrade.
+        localVault = new LocalVaultStore(this);
         cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
         buildShell();
         showHome();
@@ -142,6 +149,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         stopSos(false);
+        stopLiveMonitorSilently();
     }
 
     @Override
@@ -166,14 +174,14 @@ public class MainActivity extends Activity {
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
         TextView appName = text("HUGZZBOTZX", 22, INK, true);
-        TextView edition = text("V7.1 • LIVE DEVICE MANAGEMENT", 10, VIOLET, true);
+        TextView edition = text("V8.0 • ULTIMATE COMIC COMMAND", 10, VIOLET, true);
         brand.addView(appName);
         brand.addView(edition);
         LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(0, -2, 1f);
         brandParams.leftMargin = dp(10);
         header.addView(brand, brandParams);
 
-        TextView badge = text("71", 13, Color.WHITE, true);
+        TextView badge = text("80", 13, Color.WHITE, true);
         badge.setGravity(Gravity.CENTER);
         badge.setBackgroundColor(PINK);
         header.addView(badge, new LinearLayout.LayoutParams(dp(42), dp(38)));
@@ -191,7 +199,7 @@ public class MainActivity extends Activity {
         LinearLayout nav = horizontal();
         nav.setPadding(dp(5), dp(5), dp(5), dp(5));
         nav.setBackgroundColor(INK);
-        String[] tabs = {"HOME", "CONTROL", "DEVICES", "APPS", "TOOLS", "BUG LAB", "SENDER", "MEDIA", "SECURITY", "ADMIN", "BOTS", "MONITOR", "NOTIFY", "BACKUP", "FAMILY", "LOGS", "MORE"};
+        String[] tabs = {"HOME", "CONTROL", "DEVICES", "APPS", "TOOLS", "BUG LAB", "SENDER", "MEDIA", "SECURITY", "ADMIN", "BOTS", "MONITOR", "NOTIFY", "BACKUP", "FAMILY", "VAULT", "PERMS", "SYSTEM", "INTEGRATIONS", "LOGS", "MORE"};
         for (String tab : tabs) {
             Button b = new Button(this);
             b.setText(tab);
@@ -206,9 +214,30 @@ public class MainActivity extends Activity {
         navScroll.addView(nav);
         root.addView(navScroll);
         setContentView(root);
+        configureEdgeToEdge();
+    }
+
+    /** Android 15/16 edge-to-edge support without a third-party dependency. */
+    private void configureEdgeToEdge() {
+        if (Build.VERSION.SDK_INT >= 35) {
+            Window window = getWindow();
+            window.setStatusBarColor(Color.TRANSPARENT);
+            window.setNavigationBarColor(Color.TRANSPARENT);
+            if (Build.VERSION.SDK_INT >= 29) {
+                window.setStatusBarContrastEnforced(false);
+                window.setNavigationBarContrastEnforced(true);
+            }
+            root.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+            root.requestApplyInsets();
+        }
     }
 
     private void navigate(String tab) {
+        if (!"MONITOR".equals(tab)) stopLiveMonitorSilently();
         if (!"FAMILY".equals(tab)) familyUnlocked = false;
         switch (tab) {
             case "HOME": showHome(); break;
@@ -227,6 +256,10 @@ public class MainActivity extends Activity {
             case "MONITOR": showLiveMonitor(); break;
             case "NOTIFY": showNotificationCenter(); break;
             case "BACKUP": showBackupCenter(); break;
+            case "VAULT": showLocalVault(); break;
+            case "PERMS": showPermissionCenter(); break;
+            case "SYSTEM": showSystemCenter(); break;
+            case "INTEGRATIONS": showIntegrationCenter(); break;
             default: showMore(); break;
         }
     }
@@ -305,7 +338,7 @@ public class MainActivity extends Activity {
 
     private void showHome() {
         clearPage();
-        comic("WELCOME, OPERATOR! A colorful command center for your own device and authorized support.", YELLOW);
+        comic("WELCOME, OPERATOR! V8 ULTIMATE COMMAND — comic-style local administration, device diagnostics and privacy-first media tools.", YELLOW);
         card("DEVICE SNAPSHOT", deviceSummary(), SKY);
         card("QUICK CONTROL", "Open Android panels for Wi-Fi, Bluetooth, location, display, sound, battery and notifications. Android remains in charge of protected settings.", LAV);
         addButton("OPEN CONTROL CENTER", VIOLET, v -> showControlCenter());
@@ -840,6 +873,171 @@ public class MainActivity extends Activity {
                 }).show());
     }
 
+    // --------------------------- V8 PERMISSION CENTER ---------------------------
+    private boolean hasRuntimePermission(String permission) {
+        if (Build.VERSION.SDK_INT < 23) return true;
+        try { return checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED; }
+        catch (Exception e) { return false; }
+    }
+
+    private boolean hasNotificationPermission() {
+        return Build.VERSION.SDK_INT < 33 || hasRuntimePermission(Manifest.permission.POST_NOTIFICATIONS);
+    }
+
+    private boolean isBatteryOptimizationIgnored() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+        } catch (Exception e) { return false; }
+    }
+
+    private void showPermissionCenter() {
+        clearPage();
+        comic("PERMISSION CENTER — transparent access, granted only when a feature needs it.", CYAN);
+        card("MEDIA ACCESS", mediaAccessSummary(), LAV);
+        card("CAMERA / FLASHLIGHT", hasRuntimePermission(Manifest.permission.CAMERA) ? "Granted — used only by the flashlight/SOS action." : "Not granted — Android asks when flashlight/SOS is first used.", SKY);
+        card("NOTIFICATIONS", hasNotificationPermission() ? "Granted or not required on this Android version." : "Not granted — reminders will ask before scheduling.", PEACH);
+        card("USAGE ACCESS", hasUsageAccess() ? "Available — app usage analytics can query Android UsageStats." : "Not available — usage report is disabled until enabled in Android Settings.", YELLOW);
+        card("BATTERY OPTIMIZATION", isBatteryOptimizationIgnored() ? "This app is exempt from battery optimization." : "Standard Android battery optimization is active.", MINT);
+        card("NETWORK", "INTERNET and ACCESS_NETWORK_STATE are normal manifest permissions. HugzzBotzX does not run a background device scanner.", LAV);
+        addButton("REQUEST ALL MEDIA CATEGORIES", VIOLET, v -> new AlertDialog.Builder(this)
+                .setTitle("Media library access")
+                .setMessage("Android will ask separately for media categories. You may grant full access, selected-only access, or deny. The app will only list media while Media Center is open.")
+                .setNegativeButton("CANCEL", null).setPositiveButton("CONTINUE", (d, w) -> requestMediaLibraryAccess()).show());
+        addButton("REQUEST CAMERA FOR FLASHLIGHT", PINK, v -> {
+            if (hasRuntimePermission(Manifest.permission.CAMERA)) toast("Camera permission is already granted.");
+            else requestPermissions(new String[]{Manifest.permission.CAMERA}, 61);
+        });
+        addButton("ENABLE USAGE ACCESS", VIOLET, v -> openSettings(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+        addButton("ENABLE NOTIFICATIONS", PINK, v -> {
+            if (hasNotificationPermission()) toast("Notifications are already available.");
+            else requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATION_PERMISSION_ONLY);
+        });
+        addButton("OPEN APP PERMISSION SETTINGS", VIOLET, v -> openAppDetails());
+        addButton("OPEN BATTERY OPTIMIZATION SETTINGS", PINK, v -> openSettings(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        addButton("OPEN ANDROID PRIVACY DASHBOARD", VIOLET, v -> openSettings(Settings.ACTION_PRIVACY_SETTINGS));
+        card("MEDIA SAFETY", "No MANAGE_EXTERNAL_STORAGE permission is requested. Use Android Photo Picker or the Storage Access Framework for one-file access. Category permissions are requested only after you choose them.", SKY);
+    }
+
+    // --------------------------- V8 LOCAL PRIVATE VAULT ---------------------------
+    private void showLocalVault() {
+        clearPage();
+        comic("PRIVATE VAULT — notes stored inside HugzzBotzX app-private storage.", PINK);
+        card("PRIVACY", "Vault notes are stored in this app's private files directory, not in shared storage. They are not uploaded or included in cloud sync. Export a copy only when you choose to share it.", LAV);
+        addButton("CREATE NEW PRIVATE NOTE", VIOLET, v -> editVaultNote(null));
+        List<String> notes = localVault.listNotes();
+        if (notes.isEmpty()) {
+            card("VAULT IS EMPTY", "Create a note to store local setup instructions, device labels or reminders.", YELLOW);
+            return;
+        }
+        card("SAVED NOTES", notes.size() + " local note(s). Select one to view or edit.", SKY);
+        for (String name : notes) {
+            addButton("OPEN • " + name, PINK, v -> editVaultNote(name));
+        }
+    }
+
+    private void editVaultNote(String existingName) {
+        final EditText titleInput = new EditText(this);
+        titleInput.setSingleLine(true);
+        titleInput.setHint("Note title (letters, numbers, spaces, _ or -)");
+        final EditText bodyInput = new EditText(this);
+        bodyInput.setGravity(Gravity.TOP);
+        bodyInput.setMinLines(5);
+        bodyInput.setHint("Write a private note… (max 64 KB)");
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(10), dp(4), dp(10), dp(4));
+        form.addView(titleInput);
+        form.addView(bodyInput, new LinearLayout.LayoutParams(-1, dp(180)));
+        if (existingName != null) {
+            titleInput.setText(existingName);
+            titleInput.setEnabled(false);
+            try { bodyInput.setText(localVault.readNote(existingName)); }
+            catch (Exception e) { toast("Could not read this note."); return; }
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(existingName == null ? "New private note" : "Private note")
+                .setView(form)
+                .setNegativeButton("CLOSE", null)
+                .setPositiveButton("SAVE", (d, w) -> {
+                    String noteTitle = titleInput.getText().toString().trim();
+                    String body = bodyInput.getText().toString();
+                    try {
+                        localVault.saveNote(noteTitle, body);
+                        log("Private vault note saved: " + noteTitle);
+                        toast("Private note saved.");
+                        showLocalVault();
+                    } catch (Exception e) { toast("Save failed: " + e.getMessage()); }
+                });
+        if (existingName != null) {
+            builder.setNeutralButton("DELETE", (d, w) -> new AlertDialog.Builder(this)
+                    .setTitle("Delete private note?").setMessage("This permanently removes this note from app-private storage.")
+                    .setNegativeButton("CANCEL", null).setPositiveButton("DELETE", (dd, ww) -> {
+                        if (localVault.deleteNote(existingName)) {
+                            log("Private vault note deleted: " + existingName);
+                            showLocalVault();
+                        } else toast("Could not delete note.");
+                    }).show());
+            builder.setOnCancelListener(d -> { });
+        }
+        builder.show();
+    }
+
+    // --------------------------- V8 SYSTEM INFORMATION ---------------------------
+    private void showSystemCenter() {
+        clearPage();
+        comic("SYSTEM CENTER — platform state reported by Android APIs.", YELLOW);
+        ActivityManager.MemoryInfo mem = new ActivityManager.MemoryInfo();
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        if (am != null) am.getMemoryInfo(mem);
+        KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+        boolean lockedSecure = km != null && km.isDeviceSecure();
+        boolean devOptions = false;
+        boolean adbEnabled = false;
+        try { devOptions = Settings.Global.getInt(getContentResolver(), Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1; } catch (Exception ignored) { }
+        try { adbEnabled = Settings.Global.getInt(getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1; } catch (Exception ignored) { }
+        boolean owner = false;
+        try {
+            android.app.admin.DevicePolicyManager dpm = (android.app.admin.DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
+            owner = dpm != null && (dpm.isDeviceOwnerApp(getPackageName()) || dpm.isProfileOwnerApp(getPackageName()));
+        } catch (Exception ignored) { }
+        long uptime = android.os.SystemClock.elapsedRealtime() / 1000L;
+        String details = "Manufacturer: " + Build.MANUFACTURER + "\nModel: " + Build.MODEL
+                + "\nProduct: " + Build.PRODUCT + "\nAndroid: " + Build.VERSION.RELEASE
+                + "\nAPI level: " + Build.VERSION.SDK_INT + "\nSecurity patch: " + Build.VERSION.SECURITY_PATCH
+                + "\nBuild fingerprint: " + Build.FINGERPRINT
+                + "\nABIs: " + java.util.Arrays.toString(Build.SUPPORTED_ABIS)
+                + "\nSecure screen lock: " + (lockedSecure ? "Yes" : "No")
+                + "\nDeveloper options: " + (devOptions ? "Enabled" : "Disabled")
+                + "\nADB debugging: " + (adbEnabled ? "Enabled" : "Disabled")
+                + "\nDevice/Profile Owner: " + (owner ? "This app is owner" : "No")
+                + "\nDevice uptime: " + DateUtils.formatElapsedTime(uptime);
+        card("PLATFORM DETAILS", details, SKY);
+        card("MEMORY", "Total RAM: " + readableBytes(mem.totalMem) + "\nAvailable RAM: " + readableBytes(mem.availMem) + "\nLow-memory state: " + (mem.lowMemory ? "Yes" : "No"), LAV);
+        card("POWER", batterySummary() + "\nBattery optimization exemption: " + (isBatteryOptimizationIgnored() ? "Yes" : "No"), PEACH);
+        addButton("OPEN ABOUT PHONE", VIOLET, v -> openSettings(Settings.ACTION_DEVICE_INFO_SETTINGS));
+        addButton("OPEN DEVELOPER OPTIONS", PINK, v -> openDeveloperOptions());
+        addButton("OPEN SECURITY SETTINGS", VIOLET, v -> openSettings(Settings.ACTION_SECURITY_SETTINGS));
+        addButton("EXPORT SYSTEM REPORT", PINK, v -> shareReport());
+    }
+
+    // --------------------------- V8 INTEGRATION STATUS ---------------------------
+    private void showIntegrationCenter() {
+        clearPage();
+        comic("INTEGRATION CENTER — configure connectors without pretending that an API is already connected.", CYAN);
+        card("GOOGLE AUTH", "Not connected. Production Google sign-in requires an OAuth client configuration, verified package/signing fingerprints and a backend session verifier.", LAV);
+        card("WHATSAPP BUSINESS", SecretVault.contains(this, "whatsapp_business_token") ? "Local encrypted token exists. Provider API delivery is not active in this client." : "Not configured. Official WhatsApp Business API requires a business account, approved token and backend.", SKY);
+        card("TELEGRAM BOT", SecretVault.contains(this, "telegram_bot_token") ? "Local encrypted token exists. Bot API delivery/webhook processing is not active in this client." : "Not configured. Telegram bot delivery requires a token and server-side webhook/worker.", PEACH);
+        card("BACKEND / WEBHOOK", prefs.getString("v7_webhook_url", "").isEmpty() ? "No HTTPS endpoint saved." : "HTTPS endpoint saved locally: " + prefs.getString("v7_webhook_url", ""), YELLOW);
+        card("DEVICE CLOUD SYNC", "Not connected. The current app keeps device profiles and activity local. Cloud sync needs a deployed server, user authentication, device enrollment and revocable session tokens.", MINT);
+        addButton("SAVE ENCRYPTED API TOKEN", VIOLET, v -> saveIntegrationSecret());
+        addButton("CONFIGURE HTTPS WEBHOOK", PINK, v -> configureWebhook());
+        addButton("CHECK HTTPS CERTIFICATE", VIOLET, v -> promptTlsCheck());
+        addButton("OPEN BOT MANAGER", PINK, v -> showBotManager());
+        addButton("OPEN SENDER MANAGER", VIOLET, v -> showSender());
+        card("SECURITY RULE", "Never place production API secrets in source code, ZIP files, public Git repositories or screenshots. A token saved here stays encrypted on this device and is not automatically transmitted.", LAV);
+    }
+
     private void showMore() {
         clearPage();
         comic("MORE — app permissions, usage report, support and privacy.", MINT);
@@ -847,8 +1045,12 @@ public class MainActivity extends Activity {
         addButton("USAGE ACCESS SETTINGS", PINK, v -> openSettings(Settings.ACTION_USAGE_ACCESS_SETTINGS));
         addButton("USAGE ANALYTICS REPORT", VIOLET, v -> showUsageReport());
         addButton("OPEN ANDROID SETTINGS", PINK, v -> openSettings(Settings.ACTION_SETTINGS));
+        addButton("PERMISSION CENTER", VIOLET, v -> showPermissionCenter());
+        addButton("SYSTEM CENTER", PINK, v -> showSystemCenter());
+        addButton("PRIVATE FILE VAULT", VIOLET, v -> showLocalVault());
+        addButton("INTEGRATION STATUS", PINK, v -> showIntegrationCenter());
         addButton("SHARE FULL DEVICE REPORT", VIOLET, v -> shareReport());
-        card("ABOUT HUGZZBOTZX V7.1", "Ultimate Comic System Edition\nSender opt-in • media center • local security audit • admin tools • local bot templates • authorized ADB helpers • app manager • usage analytics • bounded Bug Lab.", SKY);
+        card("ABOUT HUGZZBOTZX V8.0", "Ultimate Comic System Edition\nSender opt-in • media center • local security audit • admin tools • local bot templates • authorized ADB helpers • app manager • usage analytics • bounded Bug Lab.", SKY);
     }
 
     private void showDiagnostics() {
@@ -909,7 +1111,7 @@ public class MainActivity extends Activity {
     }
 
     private void shareReport() {
-        String report = "HugzzBotzX Ultimate System V7.1\n" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date())
+        String report = "HugzzBotzX Ultimate System V8.0\n" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date())
                 + "\n\n" + deviceSummary()
                 + "\nCPU cores: " + Runtime.getRuntime().availableProcessors()
                 + "\n\nLOCAL LOGS\n" + prefs.getString("logs", "No log entries")
@@ -929,7 +1131,7 @@ public class MainActivity extends Activity {
         prefs.edit().putString("logs", updated).apply();
     }
 
-    // --------------------------- V7 MEDIA CENTER ---------------------------
+    // --------------------------- V8 MEDIA CENTER ---------------------------
     private void showMediaCenter() {
         clearPage();
         comic("MEDIA HQ — use Android's picker or grant media-library access only when you open this feature.", CYAN);
@@ -1139,7 +1341,7 @@ public class MainActivity extends Activity {
         shareMediaUri(Uri.parse(value), lastSelectedMime);
     }
 
-    // --------------------------- V7 GLOBAL SENDER ---------------------------
+    // --------------------------- V8 CONSENT-FIRST SENDER ---------------------------
     private JSONArray storedArray(String key) {
         try { return new JSONArray(prefs.getString(key, "[]")); }
         catch (Exception e) { return new JSONArray(); }
@@ -1241,7 +1443,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("New message template").setView(form).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)->{if(title.getText().toString().trim().isEmpty()||body.getText().toString().trim().isEmpty())return;JSONArray a=storedArray("v7_sender_templates");JSONObject o=new JSONObject();try{o.put("title",title.getText().toString().trim());o.put("body",body.getText().toString());a.put(o);saveArray("v7_sender_templates",a);log("Message template saved");toast("Template saved locally.");}catch(Exception ignored){}}).show();
     }
 
-    // --------------------------- V7 DEVICE REGISTRY ---------------------------
+    // --------------------------- V8 AUTHORIZED DEVICE REGISTRY ---------------------------
     private void showAdbPairingWizard() {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
@@ -1497,7 +1699,7 @@ public class MainActivity extends Activity {
         new Thread(()->{String out;HttpsURLConnection conn=null;try{URL u=new URL(target);if(!"https".equalsIgnoreCase(u.getProtocol())||u.getHost().isEmpty())throw new Exception("Only a valid HTTPS URL is accepted.");conn=(HttpsURLConnection)u.openConnection();conn.setConnectTimeout(8000);conn.setReadTimeout(8000);conn.setInstanceFollowRedirects(true);conn.connect();java.security.cert.Certificate[] certs=conn.getServerCertificates();if(certs.length==0)throw new Exception("No peer certificate presented.");X509Certificate cert=(X509Certificate)certs[0];cert.checkValidity();out="TLS connection: trusted by Android\nHost: "+u.getHost()+"\nSubject: "+cert.getSubjectX500Principal()+"\nIssuer: "+cert.getIssuerX500Principal()+"\nValid from: "+cert.getNotBefore()+"\nValid until: "+cert.getNotAfter()+"\nHTTP status: "+conn.getResponseCode();}catch(Exception e){out="HTTPS check failed: "+e.getClass().getSimpleName()+" — "+e.getMessage();}finally{if(conn!=null)conn.disconnect();}final String result=out;runOnUiThread(()->new AlertDialog.Builder(this).setTitle("TLS certificate result").setMessage(result).setPositiveButton("OK",null).setNeutralButton("SHARE",(d,w)->shareText("TLS check",result)).show());}).start();
     }
 
-    // --------------------------- V7 ADMIN / INTEGRATIONS ---------------------------
+    // --------------------------- V8 LOCAL ADMIN / INTEGRATIONS ---------------------------
     private void showAdminPanel() {
         clearPage();comic("ADMIN HQ — local operator roles, secure secret storage, configuration and backup.",YELLOW);
         card("MODE", "This build provides a local administration workspace. Server users, Google OAuth, 2FA, API requests and cloud database require a separately deployed backend.",LAV);
@@ -1530,7 +1732,7 @@ public class MainActivity extends Activity {
         boolean on=!prefs.getBoolean("v7_maintenance",false);prefs.edit().putBoolean("v7_maintenance",on).apply();log("Local maintenance mode "+(on?"enabled":"disabled"));toast("Local maintenance mode "+(on?"ON":"OFF"));
     }
 
-    // --------------------------- V7 BOT MANAGER ---------------------------
+    // --------------------------- V8 BOT TEMPLATE MANAGER ---------------------------
     private void showBotManager() {
         clearPage();comic("BOT STUDIO — reusable FAQ templates and channel handoff.",PINK);
         card("INTEGRATION STATUS", "Telegram / WhatsApp API tokens can be stored in the encrypted local vault. A real bot needs an approved provider account, HTTPS webhook backend and server-side message handling.",LAV);
@@ -1560,7 +1762,7 @@ public class MainActivity extends Activity {
         Intent i=new Intent(Intent.ACTION_SEND);i.setType("text/plain");i.putExtra(Intent.EXTRA_SUBJECT,subject);i.putExtra(Intent.EXTRA_TEXT,body);startActivity(Intent.createChooser(i,"Share using"));
     }
 
-    // --------------------------- V7 MONITORING / NOTIFICATIONS ---------------------------
+    // --------------------------- V8 MONITORING / NOTIFICATIONS ---------------------------
     private void showLiveMonitor() {
         clearPage();comic("LIVE MONITOR — refreshes local metrics while this page is open.",CYAN);
         monitorReadout=text("Ready to monitor this device.",13,INK,false);monitorReadout.setPadding(dp(12),dp(12),dp(12),dp(12));monitorReadout.setBackgroundResource(R.drawable.panel);content.addView(monitorReadout);
@@ -1574,6 +1776,11 @@ public class MainActivity extends Activity {
     }
 
     private void stopLiveMonitor() {monitorRunning=false;if(monitorRunnable!=null)handler.removeCallbacks(monitorRunnable);toast("Live monitor stopped.");log("Live monitor stopped");}
+
+    private void stopLiveMonitorSilently() {
+        monitorRunning = false;
+        if (monitorRunnable != null) handler.removeCallbacks(monitorRunnable);
+    }
 
     private void showNotificationCenter() {
         clearPage();comic("NOTIFICATION CENTER — local reminders and visible device prompts.",YELLOW);
@@ -1602,7 +1809,7 @@ public class MainActivity extends Activity {
         }catch(Exception e){toast("Could not schedule reminder.");}
     }
 
-    // --------------------------- V7 BACKUP / RESTORE ---------------------------
+    // --------------------------- V8 BACKUP / RESTORE ---------------------------
     private void showBackupCenter() {
         clearPage();comic("BACKUP CENTER — export or restore HugzzBotzX local settings and opt-in records.",MINT);
         card("WHAT IS INCLUDED","Local preferences such as sender opt-in list, device notes, roles, templates, routines and activity log. Android Keystore secrets are not exported.",LAV);
@@ -1612,14 +1819,14 @@ public class MainActivity extends Activity {
     }
 
     private void startBackupExport() {
-        Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"hugzzbotzx-v7-backup.json");startActivityForResult(i,REQ_EXPORT_BACKUP);
+        Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"hugzzbotzx-v8-backup.json");startActivityForResult(i,REQ_EXPORT_BACKUP);
     }
 
     private void startBackupImport() {Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");startActivityForResult(i,REQ_IMPORT_BACKUP);}
 
     private void writeBackup(Uri uri) {
         try {
-            JSONObject root=new JSONObject();root.put("application","HugzzBotzX");root.put("schema",1);root.put("createdAt",System.currentTimeMillis());JSONObject data=new JSONObject();
+            JSONObject root=new JSONObject();root.put("application","HugzzBotzX");root.put("schema",2);root.put("createdAt",System.currentTimeMillis());JSONObject data=new JSONObject();
             for(Map.Entry<String,?> e:prefs.getAll().entrySet()){Object v=e.getValue();if(v instanceof String||v instanceof Boolean||v instanceof Integer||v instanceof Long||v instanceof Float||v instanceof Double)data.put(e.getKey(),v);}
             root.put("preferences",data);try(OutputStream out=getContentResolver().openOutputStream(uri,"w")){if(out==null)throw new Exception("Destination cannot be opened");out.write(root.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));}
             log("Local settings backup exported");toast("Backup saved to your chosen location.");
@@ -1654,6 +1861,7 @@ public class MainActivity extends Activity {
         if(requestCode==REQ_MEDIA_PERMS){boolean any=false;for(int r:grantResults)if(r==PackageManager.PERMISSION_GRANTED)any=true;if(any){toast("Media permission updated. Only granted media categories are visible.");showMediaLibrary();}else{toast("No media library permission granted. You can still pick individual files.");showMediaCenter();}}
         else if(requestCode==REQ_POST_NOTIFICATIONS){if(grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED)scheduleLocalReminder(pendingReminderMinutes,pendingReminderText);else toast("Notification permission denied. Reminder was not scheduled.");}
         else if(requestCode==61||requestCode==62){if(grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED)toast("Camera permission granted. Tap the flashlight action again.");}
+        else if(requestCode==REQ_NOTIFICATION_PERMISSION_ONLY){toast(grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED?"Notification permission granted.":"Notification permission not granted.");}
     }
 
     private void toast(String message) {

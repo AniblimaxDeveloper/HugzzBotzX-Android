@@ -1,45 +1,28 @@
-# HugzzBotzX V7.1 — Live Device Management
+# HugzzBotzX V8.0 — Ultimate Comic Command
 
-Android Native Java app with colorful comic UI and local-first admin, sender, media, security and device tooling.
+A colorful Android Native Java control, media, security and family utility panel.
 
-## V7.1 additions
-- Wireless ADB pairing wizard: validates host/ports, stores device profile, copies `adb pair` command. Pairing code is typed into Termux and never stored by the app.
-- Device registry with separate pairing and connection ports, connect/disconnect command helpers, safe read-only diagnostics, and local profile removal.
-- Support session manager with current owner approval, purpose, start/end time and local audit history. It is a local session record, not remote control or screen streaming.
-- Per-category media access (images, videos, audio), visible permission status and per-action Android picker fallbacks.
-- Version 7.1.0 / versionCode 71; workflow artifact `HugzzBotzX-V71-debug-apk`.
+## Included
+- Home dashboard, System Center, Android Control Center and Permission Center.
+- Authorized ADB pairing helper, local device registry, support session records and read-only diagnostic command snippets.
+- Launcher-visible App Manager, local performance Bug Lab, flashlight and slow SOS.
+- Consent-first Sender (local opt-in records + one-recipient manual drafts, no bulk auto-send).
+- Media Center with images/video/audio categories, partial photo/video access, Android picker, APK metadata inspection and SHA-256 file hashing.
+- Security Center, local admin roles, Android Keystore AES-GCM token vault and bot FAQ templates.
+- Live local monitoring, local reminders, activity logs, JSON backup/restore and app-private Private Vault notes.
+- Original HugzzBotzX launcher logo retained from the user-provided artwork.
 
-## Modules
-HOME • CONTROL • DEVICES • APPS • TOOLS • BUG LAB • SENDER • MEDIA • SECURITY • ADMIN • BOTS • MONITOR • NOTIFY • BACKUP • FAMILY • LOGS • MORE
+## Important
+This is not a stealth RAT. No silent remote control, hidden media access, keylogging, malware, exploit, destructive device payload, or unsolicited bulk messaging is included. ADB requires target-side Wireless Debugging approval. Support session entries are local consent/audit records, not live screen sharing. Google OAuth, cloud sync, official messaging APIs and remote assistance require a separately deployed backend and provider credentials.
+
+## Permissions
+The app does not request all permissions on first launch. It asks at the point of use. Images, video and audio use granular runtime permissions and/or the Android Photo Picker / Storage Access Framework. No `MANAGE_EXTERNAL_STORAGE` all-files permission is declared. Media is not scanned in the background.
 
 ## Build
 - JDK 17
-- Android Gradle Plugin 9.5.0
+- AGP 9.5.0
 - Gradle 9.6.0
 - Android SDK 36 / Build Tools 36.0.0
+- `gradle --no-daemon --stacktrace :app:assembleDebug`
 
-Termux ADB setup guide: `docs/TERMUX-V7.1.md`
-
-GitHub Actions: `.github/workflows/android.yml`
-
-## Termux update
-Extract over the existing `~/projects/HugzzBotzX` repository and preserve `.git`, then:
-
-```bash
-git add -A
-git commit -m "Upgrade HugzzBotzX V7.1 Live Device Management"
-git push origin main
-```
-
-## ADB safety and limits
-- Pairing uses Android Wireless debugging and requires the target owner to display and approve the pairing code.
-- The app copies ADB commands; it does not run arbitrary shell commands, silently connect, or bypass Android authorization.
-- A stored device profile is not a live connection status. Confirm ADB state with `adb devices -l` in Termux.
-- Local support sessions record owner approval and session timing; they do not stream or control a remote screen.
-- To revoke ADB host trust, the target owner must remove the host from Developer options → Wireless debugging → Paired devices. Removing a local profile is not target-side revocation.
-
-## Media privacy
-- Permissions are requested on the Media screen, category by category, or when the user selects the explicit all-categories option.
-- Android Photo Picker / Storage Access Framework can grant access to only a user-selected item.
-- No `MANAGE_EXTERNAL_STORAGE` permission is requested. No media is scanned in the background.
-- API integrations, cloud sync, Google OAuth, official bot delivery and live remote support require a separately deployed secure backend and provider credentials.
+See `docs/V8-FEATURES.md`, `docs/V8-TEST-MATRIX.md`, and `docs/V8-TERMUX.md`.
