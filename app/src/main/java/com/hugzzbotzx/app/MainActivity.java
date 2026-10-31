@@ -43,6 +43,31 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import org.json.JSONObject;
+import org.json.JSONArray;
+import javax.net.ssl.HttpsURLConnection;
+import java.security.cert.X509Certificate;
+import java.net.URL;
+import java.io.OutputStream;
+import java.io.InputStream;
+import java.io.FileOutputStream;
+import java.io.File;
+import java.io.ByteArrayOutputStream;
+import android.widget.Spinner;
+import android.widget.CheckBox;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
+import android.provider.OpenableColumns;
+import android.provider.MediaStore;
+import android.net.Uri;
+import android.net.TrafficStats;
+import android.database.Cursor;
+import android.content.ContentUris;
+import android.app.PendingIntent;
+import android.app.NotificationManager;
+import android.app.NotificationChannel;
+import android.app.Notification;
+import android.app.AlarmManager;
 
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -58,7 +83,7 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 
 /**
- * HugzzBotzX DevLab V6.1 — comic-style local device control and authorized diagnostics.
+ * HugzzBotzX Ultimate System V7.0 — comic-style local device control and authorized diagnostics.
  * All control actions open Android's own settings UI or operate on this device.
  * ADB snippets are copied for the user to run in Termux after target-side authorization.
  */
@@ -87,6 +112,22 @@ public class MainActivity extends Activity {
     private long focusEndAt = 0L;
     private TextView focusStatus;
     private boolean familyUnlocked = false;
+    private static final int REQ_MEDIA_PERMS = 701;
+    private static final int REQ_PICK_IMAGE = 702;
+    private static final int REQ_PICK_VIDEO = 703;
+    private static final int REQ_PICK_AUDIO = 704;
+    private static final int REQ_PICK_APK = 705;
+    private static final int REQ_PICK_HASH = 706;
+    private static final int REQ_EXPORT_BACKUP = 707;
+    private static final int REQ_IMPORT_BACKUP = 708;
+    private static final int REQ_POST_NOTIFICATIONS = 709;
+    private Uri lastSelectedUri;
+    private String lastSelectedMime = "application/octet-stream";
+    private int pendingReminderMinutes = 0;
+    private String pendingReminderText = "HugzzBotzX reminder";
+    private Runnable monitorRunnable;
+    private TextView monitorReadout;
+    private boolean monitorRunning = false;
 
     @Override
     public void onCreate(Bundle state) {
@@ -125,14 +166,14 @@ public class MainActivity extends Activity {
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
         TextView appName = text("HUGZZBOTZX", 22, INK, true);
-        TextView edition = text("V6.1 • COMIC COMMAND CONTROL", 10, VIOLET, true);
+        TextView edition = text("V7.0 • ULTIMATE COMIC SYSTEM", 10, VIOLET, true);
         brand.addView(appName);
         brand.addView(edition);
         LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(0, -2, 1f);
         brandParams.leftMargin = dp(10);
         header.addView(brand, brandParams);
 
-        TextView badge = text("61", 13, Color.WHITE, true);
+        TextView badge = text("70", 13, Color.WHITE, true);
         badge.setGravity(Gravity.CENTER);
         badge.setBackgroundColor(PINK);
         header.addView(badge, new LinearLayout.LayoutParams(dp(42), dp(38)));
@@ -150,7 +191,7 @@ public class MainActivity extends Activity {
         LinearLayout nav = horizontal();
         nav.setPadding(dp(5), dp(5), dp(5), dp(5));
         nav.setBackgroundColor(INK);
-        String[] tabs = {"HOME", "CONTROL", "DEVICES", "APPS", "TOOLS", "BUG LAB", "FAMILY", "LOGS", "MORE"};
+        String[] tabs = {"HOME", "CONTROL", "DEVICES", "APPS", "TOOLS", "BUG LAB", "SENDER", "MEDIA", "SECURITY", "ADMIN", "BOTS", "MONITOR", "NOTIFY", "BACKUP", "FAMILY", "LOGS", "MORE"};
         for (String tab : tabs) {
             Button b = new Button(this);
             b.setText(tab);
@@ -178,6 +219,14 @@ public class MainActivity extends Activity {
             case "BUG LAB": showBugLab(); break;
             case "FAMILY": requestFamilyAccess(); break;
             case "LOGS": showLogs(); break;
+            case "SENDER": showSender(); break;
+            case "MEDIA": showMediaCenter(); break;
+            case "SECURITY": showSecurityCenter(); break;
+            case "ADMIN": showAdminPanel(); break;
+            case "BOTS": showBotManager(); break;
+            case "MONITOR": showLiveMonitor(); break;
+            case "NOTIFY": showNotificationCenter(); break;
+            case "BACKUP": showBackupCenter(); break;
             default: showMore(); break;
         }
     }
@@ -249,6 +298,8 @@ public class MainActivity extends Activity {
     }
 
     private void clearPage() {
+        if (monitorRunnable != null) handler.removeCallbacks(monitorRunnable);
+        monitorRunning = false;
         content.removeAllViews();
     }
 
@@ -260,7 +311,11 @@ public class MainActivity extends Activity {
         addButton("OPEN CONTROL CENTER", VIOLET, v -> showControlCenter());
         addButton("RUN FULL DIAGNOSTIC", PINK, v -> showDiagnostics());
         addButton("OPEN ADB TOOLKIT", VIOLET, v -> showDevices());
-        card("SAFETY STATUS", "LOCAL-FIRST • Visible actions • User-authorized ADB • No hidden remote access • No destructive payloads", MINT);
+        addButton("OPEN ULTIMATE CONTROL PANEL", PINK, v -> showAdminPanel());
+        addButton("MEDIA & FILE CENTER", VIOLET, v -> showMediaCenter());
+        addButton("SECURITY AUDIT", PINK, v -> showSecurityCenter());
+        card("V7 MODULES", "GLOBAL SENDER (opt-in drafts) • DEVICE REGISTRY • MEDIA LIBRARY • APK PERMISSION AUDIT • LOCAL ADMIN ROLES • BOT FAQ TEMPLATES • NOTIFICATION REMINDERS • BACKUP / RESTORE", YELLOW);
+        card("SAFETY STATUS", "LOCAL-FIRST • Visible actions • User-authorized ADB • No hidden remote access • No destructive payloads • Media is accessed only after user selection or runtime permission", MINT);
     }
 
     private String deviceSummary() {
@@ -393,6 +448,9 @@ public class MainActivity extends Activity {
         addButton("COPY USER APP LIST QUERY", VIOLET, v -> copyCommand("adb -s SERIAL shell pm list packages -3"));
         card("IMPORTANT", "These are read-only diagnostic commands. Replace SERIAL with the authorized device ID and run them yourself in Termux. Pairing-note text generated by this app is only a reminder, not an ADB pairing credential.", PEACH);
         addButton("OPEN TERMUX (IF INSTALLED)", PINK, v -> launchPackage("com.termux"));
+        addButton("REGISTER CONSENTED DEVICE", VIOLET, v -> registerAuthorizedDevice());
+        addButton("VIEW / REVOKE DEVICE REGISTRY", PINK, v -> showDeviceRegistry());
+        addButton("CREATE SUPPORT INVITATION", VIOLET, v -> createSupportInvitation());
     }
 
     private void copyCommand(String command) {
@@ -783,7 +841,7 @@ public class MainActivity extends Activity {
         addButton("USAGE ANALYTICS REPORT", VIOLET, v -> showUsageReport());
         addButton("OPEN ANDROID SETTINGS", PINK, v -> openSettings(Settings.ACTION_SETTINGS));
         addButton("SHARE FULL DEVICE REPORT", VIOLET, v -> shareReport());
-        card("ABOUT HUGZZBOTZX V6.1", "Comic Command Control Edition\nLocal device utilities • authorized ADB helpers • app manager • usage analytics • bounded Bug Lab.", SKY);
+        card("ABOUT HUGZZBOTZX V7.0", "Ultimate Comic System Edition\nSender opt-in • media center • local security audit • admin tools • local bot templates • authorized ADB helpers • app manager • usage analytics • bounded Bug Lab.", SKY);
     }
 
     private void showDiagnostics() {
@@ -844,7 +902,7 @@ public class MainActivity extends Activity {
     }
 
     private void shareReport() {
-        String report = "HugzzBotzX DevLab V6.1\n" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date())
+        String report = "HugzzBotzX Ultimate System V7.0\n" + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date())
                 + "\n\n" + deviceSummary()
                 + "\nCPU cores: " + Runtime.getRuntime().availableProcessors()
                 + "\n\nLOCAL LOGS\n" + prefs.getString("logs", "No log entries")
@@ -862,6 +920,516 @@ public class MainActivity extends Activity {
         String updated = line + "\n" + old;
         if (updated.length() > 8000) updated = updated.substring(0, 8000);
         prefs.edit().putString("logs", updated).apply();
+    }
+
+    // --------------------------- V7 MEDIA CENTER ---------------------------
+    private void showMediaCenter() {
+        clearPage();
+        comic("MEDIA HQ — use Android's picker or grant media-library access only when you open this feature.", CYAN);
+        card("PRIVACY & PERMISSIONS", "V7 requests images, video and audio access only after you tap the permission button. Android 14 can grant selected photos/videos only. The safer picker works without broad storage access. A granted runtime permission remains until revoked in Settings; this app reads library rows only when you open Media Center. No MANAGE_EXTERNAL_STORAGE permission is requested.", LAV);
+        addButton("GRANT MEDIA LIBRARY ACCESS", VIOLET, v -> requestMediaLibraryAccess());
+        addButton("PICK AN IMAGE", PINK, v -> pickDocument("image/*", REQ_PICK_IMAGE));
+        addButton("PICK A VIDEO", VIOLET, v -> pickDocument("video/*", REQ_PICK_VIDEO));
+        addButton("PICK AN AUDIO FILE", PINK, v -> pickDocument("audio/*", REQ_PICK_AUDIO));
+        addButton("BROWSE ACCESSIBLE MEDIA", VIOLET, v -> showMediaLibrary());
+        addButton("SHARE LAST SELECTED MEDIA", PINK, v -> shareLastSelectedMedia());
+        addButton("ANALYZE AN APK FILE", VIOLET, v -> pickDocument("application/vnd.android.package-archive", REQ_PICK_APK));
+        addButton("CALCULATE FILE SHA-256", PINK, v -> pickDocument("*/*", REQ_PICK_HASH));
+        String last = prefs.getString("v7_last_media_name", "No media selected yet.");
+        card("LAST SELECTION", last + "\n" + prefs.getString("v7_last_media_type", "Choose a file above."), SKY);
+    }
+
+    private void requestMediaLibraryAccess() {
+        ArrayList<String> permissions = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= 33) {
+            addPermissionIfMissing(permissions, "android.permission.READ_MEDIA_IMAGES");
+            addPermissionIfMissing(permissions, "android.permission.READ_MEDIA_VIDEO");
+            addPermissionIfMissing(permissions, "android.permission.READ_MEDIA_AUDIO");
+            if (Build.VERSION.SDK_INT >= 34) addPermissionIfMissing(permissions, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED");
+        } else {
+            addPermissionIfMissing(permissions, Manifest.permission.READ_EXTERNAL_STORAGE);
+        }
+        if (permissions.isEmpty()) {
+            toast("Media access is already available.");
+            showMediaLibrary();
+        } else {
+            requestPermissions(permissions.toArray(new String[0]), REQ_MEDIA_PERMS);
+        }
+    }
+
+    private void addPermissionIfMissing(List<String> list, String permission) {
+        if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) list.add(permission);
+    }
+
+    private void pickDocument(String mimeType, int requestCode) {
+        try {
+            Intent pick;
+            // Android 13+ Photo Picker grants URI access to selected images/videos without library permission.
+            if (Build.VERSION.SDK_INT >= 33 && (requestCode == REQ_PICK_IMAGE || requestCode == REQ_PICK_VIDEO)) {
+                pick = new Intent(MediaStore.ACTION_PICK_IMAGES);
+                pick.setType(mimeType);
+            } else {
+                pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                pick.addCategory(Intent.CATEGORY_OPENABLE);
+                pick.setType(mimeType);
+                if (requestCode == REQ_PICK_APK) pick.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/vnd.android.package-archive", "application/octet-stream"});
+            }
+            startActivityForResult(pick, requestCode);
+        } catch (Exception e) {
+            toast("Android media/file picker is unavailable on this device.");
+        }
+    }
+
+    private boolean hasImageVideoAccess() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            return checkSelfPermission("android.permission.READ_MEDIA_IMAGES") == PackageManager.PERMISSION_GRANTED
+                    || checkSelfPermission("android.permission.READ_MEDIA_VIDEO") == PackageManager.PERMISSION_GRANTED
+                    || checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED") == PackageManager.PERMISSION_GRANTED;
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            return checkSelfPermission("android.permission.READ_MEDIA_IMAGES") == PackageManager.PERMISSION_GRANTED
+                    || checkSelfPermission("android.permission.READ_MEDIA_VIDEO") == PackageManager.PERMISSION_GRANTED;
+        }
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasAudioAccess() {
+        if (Build.VERSION.SDK_INT >= 33) return checkSelfPermission("android.permission.READ_MEDIA_AUDIO") == PackageManager.PERMISSION_GRANTED;
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void showMediaLibrary() {
+        clearPage();
+        comic("MEDIA LIBRARY — only items covered by the permission you selected are listed.", CYAN);
+        if (!hasImageVideoAccess() && !hasAudioAccess()) {
+            card("NO LIBRARY ACCESS", "Tap Grant Media Library Access, or use the Pick buttons to choose individual files without granting library access.", PEACH);
+            addButton("REQUEST MEDIA ACCESS", VIOLET, v -> requestMediaLibraryAccess());
+            return;
+        }
+        if (hasImageVideoAccess()) {
+            queryMediaRows(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "IMAGES", SKY);
+            queryMediaRows(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "VIDEOS", LAV);
+        }
+        if (hasAudioAccess()) queryMediaRows(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, "AUDIO", PEACH);
+        addButton("PICK A FILE WITHOUT LIBRARY ACCESS", PINK, v -> pickDocument("*/*", REQ_PICK_HASH));
+    }
+
+    private void queryMediaRows(Uri collection, String section, int tint) {
+        String[] projection = {MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.SIZE};
+        Cursor cursor = null;
+        try {
+            cursor = getContentResolver().query(collection, projection, null, null, MediaStore.MediaColumns.DATE_ADDED + " DESC");
+            if (cursor == null) return;
+            int shown = 0;
+            while (cursor.moveToNext() && shown < 15) {
+                long id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID));
+                String name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME));
+                String mime = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE));
+                long size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE));
+                Uri item = ContentUris.withAppendedId(collection, id);
+                String label = (name == null ? "Unnamed media" : name) + "\n" + (mime == null ? section : mime) + " • " + readableBytes(size);
+                addButton(section + " • " + label, tint, v -> openMediaUri(item, mime));
+                shown++;
+            }
+            if (shown == 0) card(section, "No items visible in the granted media scope.", tint);
+        } catch (SecurityException e) {
+            card(section, "Permission is not available. Re-open Media Center and grant access, or select a file manually.", PEACH);
+        } catch (Exception e) {
+            card(section, "Could not read this media collection on the current Android build.", PEACH);
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+    }
+
+    private String readableBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0);
+        return String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0));
+    }
+
+    private void rememberSelectedUri(Uri uri, String kind) {
+        lastSelectedUri = uri;
+        lastSelectedMime = getContentResolver().getType(uri);
+        String name = queryDisplayName(uri);
+        prefs.edit().putString("v7_last_media_uri", uri.toString())
+                .putString("v7_last_media_name", name)
+                .putString("v7_last_media_type", kind + " • " + (lastSelectedMime == null ? "unknown type" : lastSelectedMime))
+                .apply();
+        log("Selected " + kind + " from Android document picker");
+        new AlertDialog.Builder(this).setTitle("Media selected")
+                .setMessage(name + "\n" + kind + "\n\nAccess is limited to the URI chosen by you.")
+                .setPositiveButton("OPEN", (d, w) -> openMediaUri(uri, lastSelectedMime))
+                .setNeutralButton("SHARE", (d, w) -> shareMediaUri(uri, lastSelectedMime))
+                .setNegativeButton("CLOSE", null).show();
+    }
+
+    private String queryDisplayName(Uri uri) {
+        Cursor c = null;
+        try {
+            c = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null);
+            if (c != null && c.moveToFirst()) return c.getString(0);
+        } catch (Exception ignored) { }
+        finally { if (c != null) c.close(); }
+        return uri.getLastPathSegment() == null ? "Selected file" : uri.getLastPathSegment();
+    }
+
+    private void openMediaUri(Uri uri, String mime) {
+        try {
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(uri, mime == null ? "*/*" : mime);
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(view);
+        } catch (Exception e) { toast("No compatible app can open this media."); }
+    }
+
+    private void shareMediaUri(Uri uri, String mime) {
+        try {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType(mime == null ? "*/*" : mime);
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.setClipData(ClipData.newUri(getContentResolver(), "HugzzBotzX media", uri));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(send, "Share selected media"));
+        } catch (Exception e) { toast("Unable to share the selected media."); }
+    }
+
+    private void shareLastSelectedMedia() {
+        String value = prefs.getString("v7_last_media_uri", "");
+        if (value.isEmpty()) { toast("Select media first."); return; }
+        shareMediaUri(Uri.parse(value), lastSelectedMime);
+    }
+
+    // --------------------------- V7 GLOBAL SENDER ---------------------------
+    private JSONArray storedArray(String key) {
+        try { return new JSONArray(prefs.getString(key, "[]")); }
+        catch (Exception e) { return new JSONArray(); }
+    }
+
+    private void saveArray(String key, JSONArray array) {
+        prefs.edit().putString(key, array.toString()).apply();
+    }
+
+    private void showSender() {
+        clearPage();
+        comic("GLOBAL SENDER — consent-first message drafts, one recipient at a time.", PINK);
+        JSONArray contacts = storedArray("v7_sender_contacts");
+        int active = 0;
+        for (int i = 0; i < contacts.length(); i++) if (contacts.optJSONObject(i) != null && contacts.optJSONObject(i).optBoolean("optIn", false)) active++;
+        card("OPT-IN CONTACTS", active + " recipient(s) with recorded consent. No address-book scraping and no bulk auto-send.", LAV);
+        addButton("ADD OPT-IN RECIPIENT", VIOLET, v -> addConsentRecipient());
+        addButton("MANAGE / UNSUBSCRIBE CONTACTS", PINK, v -> manageConsentRecipients());
+        addButton("COMPOSE MESSAGE TO ONE RECIPIENT", VIOLET, v -> composeConsentedMessage());
+        addButton("MESSAGE TEMPLATE MANAGER", PINK, v -> manageMessageTemplates());
+        addButton("SCHEDULE LOCAL CAMPAIGN REMINDER", VIOLET, v -> promptReminder());
+        card("CHANNELS", "SMS and email open a draft in the user's messaging app. WhatsApp, Telegram and other channels use Android's share sheet. The user reviews and sends manually. Official business APIs need your own approved provider account and backend.", SKY);
+        if (active == 0) card("GET STARTED", "Add a recipient and tick the consent confirmation before composing a message.", YELLOW);
+    }
+
+    private void addConsentRecipient() {
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(dp(12), dp(8), dp(12), dp(4));
+        EditText name = new EditText(this); name.setHint("Recipient name"); form.addView(name);
+        EditText address = new EditText(this); address.setHint("Phone number / email (if needed)"); form.addView(address);
+        Spinner channel = new Spinner(this);
+        String[] choices = {"SMS", "EMAIL", "WHATSAPP SHARE", "TELEGRAM SHARE", "GENERAL SHARE"};
+        channel.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, choices)); form.addView(channel);
+        CheckBox consent = new CheckBox(this); consent.setText("I confirm this person opted in to receive messages."); form.addView(consent);
+        new AlertDialog.Builder(this).setTitle("Add consented recipient").setView(form)
+                .setNegativeButton("Cancel", null).setPositiveButton("Save", (d, w) -> {
+                    String n = name.getText().toString().trim(); String a = address.getText().toString().trim(); String ch = String.valueOf(channel.getSelectedItem());
+                    if (n.isEmpty() || !consent.isChecked()) { toast("Name and explicit opt-in confirmation are required."); return; }
+                    if ((ch.equals("SMS") || ch.equals("EMAIL")) && a.isEmpty()) { toast("This channel needs a phone number or email address."); return; }
+                    JSONArray arr = storedArray("v7_sender_contacts");
+                    JSONObject item = new JSONObject();
+                    try { item.put("name", n); item.put("address", a); item.put("channel", ch); item.put("optIn", true); item.put("consentAt", System.currentTimeMillis()); arr.put(item); saveArray("v7_sender_contacts", arr); log("Opt-in recipient added: " + n); toast("Recipient saved."); showSender(); }
+                    catch (Exception e) { toast("Could not save recipient."); }
+                }).show();
+    }
+
+    private void manageConsentRecipients() {
+        JSONArray arr = storedArray("v7_sender_contacts");
+        if (arr.length() == 0) { toast("No recipients saved."); return; }
+        String[] labels = new String[arr.length()];
+        for (int i=0;i<arr.length();i++) { JSONObject o=arr.optJSONObject(i); labels[i]= (o==null?"Unknown":o.optString("name")) + " • " + (o!=null && o.optBoolean("optIn",false)?"OPTED IN":"UNSUBSCRIBED"); }
+        new AlertDialog.Builder(this).setTitle("Select a recipient to unsubscribe / remove")
+                .setItems(labels, (d, which) -> new AlertDialog.Builder(this).setTitle("Revoke consent?")
+                        .setMessage("This disables future message drafts for this recipient in HugzzBotzX.")
+                        .setNegativeButton("Cancel", null).setPositiveButton("UNSUBSCRIBE", (dd, ww) -> {
+                            JSONArray updated=storedArray("v7_sender_contacts"); JSONObject o=updated.optJSONObject(which);
+                            if(o!=null){o.remove("optIn"); try{o.put("optIn",false);}catch(Exception ignored){} saveArray("v7_sender_contacts",updated);log("Recipient unsubscribed");showSender();}
+                        }).setNeutralButton("REMOVE", (dd, ww) -> { JSONArray updated=storedArray("v7_sender_contacts"); if(which<updated.length())updated.remove(which); saveArray("v7_sender_contacts",updated);log("Recipient removed from local sender list");showSender(); }).show()).show();
+    }
+
+    private void composeConsentedMessage() {
+        JSONArray contacts = storedArray("v7_sender_contacts");
+        ArrayList<Integer> indices = new ArrayList<>(); ArrayList<String> labels = new ArrayList<>();
+        for(int i=0;i<contacts.length();i++){JSONObject o=contacts.optJSONObject(i);if(o!=null&&o.optBoolean("optIn",false)){indices.add(i);labels.add(o.optString("name")+" • "+o.optString("channel"));}}
+        if(labels.isEmpty()){toast("Add an opted-in recipient first.");return;}
+        LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);form.setPadding(dp(10),dp(4),dp(10),dp(4));
+        Spinner target=new Spinner(this);target.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,labels));form.addView(target);
+        EditText subject=new EditText(this);subject.setHint("Subject (email / optional)");form.addView(subject);
+        EditText body=new EditText(this);body.setHint("Message text");body.setMinLines(4);body.setGravity(Gravity.TOP);form.addView(body);
+        JSONArray templates=storedArray("v7_sender_templates");
+        if(templates.length()>0){String[] opts=new String[templates.length()+1];opts[0]="Use a saved template…";for(int i=0;i<templates.length();i++)opts[i+1]=templates.optJSONObject(i)==null?"Template":templates.optJSONObject(i).optString("title");Spinner template=new Spinner(this);template.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,opts));form.addView(template);template.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onNothingSelected(AdapterView<?> p){} public void onItemSelected(AdapterView<?> p,View v,int pos,long id){if(pos>0){JSONObject t=templates.optJSONObject(pos-1);if(t!=null){subject.setText(t.optString("title"));body.setText(t.optString("body"));}}}});}
+        new AlertDialog.Builder(this).setTitle("Compose one consented message").setView(form)
+                .setNegativeButton("Cancel",null).setPositiveButton("OPEN DRAFT",(d,w)->{int selected=indices.get(target.getSelectedItemPosition());JSONObject contact=contacts.optJSONObject(selected);if(contact!=null)openConsentedDraft(contact,subject.getText().toString(),body.getText().toString());}).show();
+    }
+
+    private void openConsentedDraft(JSONObject contact, String subject, String body) {
+        if (!contact.optBoolean("optIn", false)) { toast("Recipient is unsubscribed."); return; }
+        if (body == null || body.trim().isEmpty()) { toast("Message cannot be empty."); return; }
+        long now=System.currentTimeMillis(); long last=prefs.getLong("v7_last_sender_open",0L);
+        if(now-last<8000L){toast("Please wait a few seconds before opening another draft.");return;}
+        String channel=contact.optString("channel","GENERAL SHARE"); String address=contact.optString("address","");
+        Intent send;
+        if(channel.equals("SMS")){send=new Intent(Intent.ACTION_SENDTO,Uri.fromParts("smsto",address,null));send.putExtra("sms_body",body);}
+        else if(channel.equals("EMAIL")){send=new Intent(Intent.ACTION_SENDTO,Uri.fromParts("mailto",address,null));send.putExtra(Intent.EXTRA_SUBJECT,subject);send.putExtra(Intent.EXTRA_TEXT,body);}
+        else {send=new Intent(Intent.ACTION_SEND);send.setType("text/plain");send.putExtra(Intent.EXTRA_SUBJECT,subject);send.putExtra(Intent.EXTRA_TEXT,body);}
+        try{prefs.edit().putLong("v7_last_sender_open",now).apply();log("Opened user-reviewed message draft for " + contact.optString("name"));startActivity(Intent.createChooser(send,"Review and send manually"));}
+        catch(Exception e){toast("No compatible messaging app is available.");}
+    }
+
+    private void manageMessageTemplates() {
+        JSONArray arr=storedArray("v7_sender_templates");
+        String[] names=new String[arr.length()+1];names[0]="+ Add new template";
+        for(int i=0;i<arr.length();i++){JSONObject o=arr.optJSONObject(i);names[i+1]=o==null?"Template":o.optString("title");}
+        new AlertDialog.Builder(this).setTitle("Message templates").setItems(names,(d,which)->{if(which==0)addMessageTemplate();else{JSONObject o=arr.optJSONObject(which-1);if(o!=null)new AlertDialog.Builder(this).setTitle(o.optString("title")).setMessage(o.optString("body")).setPositiveButton("Done",null).setNeutralButton("USE",(dd,ww)->composeConsentedMessage()).show();}})
+                .setNegativeButton("Close",null).show();
+    }
+
+    private void addMessageTemplate() {
+        LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);EditText title=new EditText(this);title.setHint("Template title");form.addView(title);EditText body=new EditText(this);body.setHint("Template body");body.setMinLines(3);form.addView(body);
+        new AlertDialog.Builder(this).setTitle("New message template").setView(form).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)->{if(title.getText().toString().trim().isEmpty()||body.getText().toString().trim().isEmpty())return;JSONArray a=storedArray("v7_sender_templates");JSONObject o=new JSONObject();try{o.put("title",title.getText().toString().trim());o.put("body",body.getText().toString());a.put(o);saveArray("v7_sender_templates",a);log("Message template saved");toast("Template saved locally.");}catch(Exception ignored){}}).show();
+    }
+
+    // --------------------------- V7 DEVICE REGISTRY ---------------------------
+    private void registerAuthorizedDevice() {
+        LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);EditText name=new EditText(this);name.setHint("Device name / alias");form.addView(name);EditText id=new EditText(this);id.setHint("ADB serial or note (optional)");form.addView(id);CheckBox consent=new CheckBox(this);consent.setText("I own this device or have the owner's permission.");form.addView(consent);
+        new AlertDialog.Builder(this).setTitle("Register authorized device").setView(form).setNegativeButton("Cancel",null).setPositiveButton("Register",(d,w)->{String n=name.getText().toString().trim();if(n.isEmpty()||!consent.isChecked()){toast("A name and authorization confirmation are required.");return;}JSONArray a=storedArray("v7_device_registry");JSONObject o=new JSONObject();try{o.put("name",n);o.put("id",id.getText().toString().trim());o.put("createdAt",System.currentTimeMillis());o.put("authorizedByUser",true);a.put(o);saveArray("v7_device_registry",a);log("Authorized device note registered: "+n);toast("Saved to local device registry.");}catch(Exception ignored){}}).show();
+    }
+
+    private void showDeviceRegistry() {
+        clearPage();comic("DEVICE REGISTRY — local inventory notes, not a live remote connection.",CYAN);JSONArray a=storedArray("v7_device_registry");
+        if(a.length()==0)card("EMPTY REGISTRY","Register a device only when you own it or its owner has consented.",LAV);
+        for(int i=0;i<a.length();i++){final int index=i;JSONObject o=a.optJSONObject(i);if(o==null)continue;card(o.optString("name"),"Identifier: "+o.optString("id","not set")+"\nAuthorization recorded: "+o.optBoolean("authorizedByUser",false),SKY);addButton("UNPAIR / REMOVE "+o.optString("name"),PINK,v->{JSONArray now=storedArray("v7_device_registry");if(index<now.length())now.remove(index);saveArray("v7_device_registry",now);log("Device registry entry revoked");showDeviceRegistry();});}
+        addButton("REGISTER ANOTHER DEVICE",VIOLET,v->registerAuthorizedDevice());
+    }
+
+    private void createSupportInvitation() {
+        byte[] b=new byte[4];new SecureRandom().nextBytes(b);String code=String.format(Locale.US,"%02X%02X-%02X%02X",b[0]&255,b[1]&255,b[2]&255,b[3]&255);
+        String message="HugzzBotzX support invitation code: "+code+"\nValid for 5 minutes. This code is only a contact/invitation note; it does not establish a remote session. The device owner must separately approve ADB or screen sharing.";
+        Intent i=new Intent(Intent.ACTION_SEND);i.setType("text/plain");i.putExtra(Intent.EXTRA_TEXT,message);startActivity(Intent.createChooser(i,"Share support invitation"));log("Support invitation note created");
+    }
+
+    // --------------------------- V7 SECURITY CENTER ---------------------------
+    private void showSecurityCenter() {
+        clearPage();comic("SECURITY LAB — local permission audit, APK inspection and TLS certificate checks.",YELLOW);
+        card("SCOPE", "This is a static permission/risk review, not a certified antivirus or vulnerability database. It does not exploit or modify other apps.",LAV);
+        addButton("AUDIT LAUNCHER APP PERMISSIONS",VIOLET,v->auditVisibleAppPermissions());
+        addButton("ANALYZE AN APK FILE",PINK,v->pickDocument("application/vnd.android.package-archive",REQ_PICK_APK));
+        addButton("VERIFY FILE INTEGRITY (SHA-256)",VIOLET,v->pickDocument("*/*",REQ_PICK_HASH));
+        addButton("CHECK HTTPS CERTIFICATE",PINK,v->promptTlsCheck());
+        addButton("CHECK NETWORK SECURITY STATUS",VIOLET,v->{String m="Connection: "+networkSummary()+"\nSecurity patch: "+Build.VERSION.SECURITY_PATCH+"\nCleartext traffic for this app: disabled in manifest.";new AlertDialog.Builder(this).setTitle("Network / platform status").setMessage(m).setPositiveButton("OK",null).show();});
+        addButton("OPEN ANDROID SECURITY SETTINGS",PINK,v->openSettings(Settings.ACTION_SECURITY_SETTINGS));
+    }
+
+    private boolean isSensitivePermission(String permission) {
+        String[] flagged={"READ_SMS","RECEIVE_SMS","SEND_SMS","READ_CONTACTS","WRITE_CONTACTS","READ_CALL_LOG","WRITE_CALL_LOG","RECORD_AUDIO","CAMERA","ACCESS_FINE_LOCATION","ACCESS_COARSE_LOCATION","READ_PHONE_STATE","MANAGE_EXTERNAL_STORAGE","SYSTEM_ALERT_WINDOW","REQUEST_INSTALL_PACKAGES","BIND_ACCESSIBILITY_SERVICE"};
+        for(String f:flagged)if(permission.endsWith(f))return true;return false;
+    }
+
+    private void auditVisibleAppPermissions() {
+        clearPage();comic("APP PERMISSION AUDIT — apps visible in the launcher only.",PINK);
+        Intent q=new Intent(Intent.ACTION_MAIN,null);q.addCategory(Intent.CATEGORY_LAUNCHER);List<ResolveInfo> rs=getPackageManager().queryIntentActivities(q,0);
+        ArrayList<String> packages=new ArrayList<>();for(ResolveInfo r:rs)if(!packages.contains(r.activityInfo.packageName))packages.add(r.activityInfo.packageName);
+        int scanned=0,flaggedApps=0;
+        for(String pkg:packages){try{android.content.pm.PackageInfo pi=getPackageManager().getPackageInfo(pkg,PackageManager.GET_PERMISSIONS);String[] requested=pi.requestedPermissions;if(requested==null)continue;ArrayList<String> risk=new ArrayList<>();for(String p:requested)if(isSensitivePermission(p))risk.add(p.substring(p.lastIndexOf('.')+1));if(!risk.isEmpty()){flaggedApps++;if(scanned++<30)card(resolveAppLabel(pkg),pkg+"\nSensitive declarations: "+risk,PEACH);}}catch(Exception ignored){}}
+        card("AUDIT SUMMARY",packages.size()+" launcher-visible package(s) inspected. "+flaggedApps+" declare one or more sensitive permissions. A declared permission is not proof of malicious behavior; review the app's purpose and Android permission grant state.",YELLOW);
+        log("Visible-app permission audit completed: "+packages.size()+" packages");
+    }
+
+    private void analyzeApk(Uri uri) {
+        card("APK ANALYSIS", "Analyzing selected APK…", SKY);
+        new Thread(()->{String result;File tmp=null;try{tmp=copyToCache(uri,".apk",200L*1024L*1024L);String hash=sha256File(tmp);android.content.pm.PackageInfo pi=getPackageManager().getPackageArchiveInfo(tmp.getAbsolutePath(),PackageManager.GET_PERMISSIONS|PackageManager.GET_SIGNATURES);if(pi==null)throw new Exception("Android PackageManager could not parse this file as an APK.");StringBuilder sb=new StringBuilder();sb.append("Package: ").append(pi.packageName).append("\nVersion: ").append(pi.versionName).append("\nSHA-256: ").append(hash).append("\n");String[] perms=pi.requestedPermissions;int flagged=0;if(perms!=null){sb.append("\nDeclared permissions:\n");for(String p:perms){sb.append("• ").append(p).append(isSensitivePermission(p)?"  [REVIEW]":"").append("\n");if(isSensitivePermission(p))flagged++;}}sb.append("\nSensitive permission declarations: ").append(flagged).append("\nThis is static metadata analysis, not a malware verdict.");result=sb.toString();}catch(Exception e){result="APK analysis failed: "+e.getMessage();}finally{if(tmp!=null)tmp.delete();}final String out=result;runOnUiThread(()->new AlertDialog.Builder(this).setTitle("APK analysis report").setMessage(out).setPositiveButton("OK",null).setNeutralButton("SHARE",(d,w)->shareText("HugzzBotzX APK report",out)).show());}).start();
+    }
+
+    private void hashSelectedFile(Uri uri) {
+        new Thread(()->{String out;try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new Exception("Cannot open selected file");java.security.MessageDigest md=java.security.MessageDigest.getInstance("SHA-256");byte[] buf=new byte[8192];int n;while((n=in.read(buf))>0)md.update(buf,0,n);out="File: "+queryDisplayName(uri)+"\nSHA-256: "+bytesToHex(md.digest());}catch(Exception e){out="Hash failed: "+e.getMessage();}final String result=out;runOnUiThread(()->new AlertDialog.Builder(this).setTitle("File integrity result").setMessage(result).setPositiveButton("OK",null).setNeutralButton("SHARE",(d,w)->shareText("SHA-256 result",result)).show());}).start();
+    }
+
+    private File copyToCache(Uri uri,String suffix,long maxBytes)throws Exception {
+        File target=File.createTempFile("hugzz_v7_",suffix,getCacheDir());long total=0;try(InputStream in=getContentResolver().openInputStream(uri);FileOutputStream out=new FileOutputStream(target)){if(in==null)throw new Exception("Selected file cannot be opened");byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1){total+=n;if(total>maxBytes)throw new Exception("File exceeds the 200 MB analysis limit");out.write(buffer,0,n);}}catch(Exception e){target.delete();throw e;}return target;
+    }
+
+    private String sha256File(File file)throws Exception {java.security.MessageDigest md=java.security.MessageDigest.getInstance("SHA-256");try(InputStream in=new java.io.FileInputStream(file)){byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1)md.update(b,0,n);}return bytesToHex(md.digest());}
+    private String bytesToHex(byte[] b){StringBuilder s=new StringBuilder();for(byte x:b)s.append(String.format(Locale.US,"%02x",x&255));return s.toString();}
+
+    private void promptTlsCheck() {
+        EditText input=new EditText(this);input.setHint("example.com or https://example.com");
+        new AlertDialog.Builder(this).setTitle("HTTPS certificate check").setMessage("Connects to the host you enter using Android's default TLS trust store. No port scanning.").setView(input).setNegativeButton("Cancel",null).setPositiveButton("CHECK",(d,w)->checkHttpsCertificate(input.getText().toString().trim())).show();
+    }
+
+    private void checkHttpsCertificate(String hostInput) {
+        if(hostInput.isEmpty()){toast("Enter a host name.");return;}String target=hostInput.startsWith("https://")?hostInput:"https://"+hostInput;
+        new Thread(()->{String out;HttpsURLConnection conn=null;try{URL u=new URL(target);if(!"https".equalsIgnoreCase(u.getProtocol())||u.getHost().isEmpty())throw new Exception("Only a valid HTTPS URL is accepted.");conn=(HttpsURLConnection)u.openConnection();conn.setConnectTimeout(8000);conn.setReadTimeout(8000);conn.setInstanceFollowRedirects(true);conn.connect();java.security.cert.Certificate[] certs=conn.getServerCertificates();if(certs.length==0)throw new Exception("No peer certificate presented.");X509Certificate cert=(X509Certificate)certs[0];cert.checkValidity();out="TLS connection: trusted by Android\nHost: "+u.getHost()+"\nSubject: "+cert.getSubjectX500Principal()+"\nIssuer: "+cert.getIssuerX500Principal()+"\nValid from: "+cert.getNotBefore()+"\nValid until: "+cert.getNotAfter()+"\nHTTP status: "+conn.getResponseCode();}catch(Exception e){out="HTTPS check failed: "+e.getClass().getSimpleName()+" — "+e.getMessage();}finally{if(conn!=null)conn.disconnect();}final String result=out;runOnUiThread(()->new AlertDialog.Builder(this).setTitle("TLS certificate result").setMessage(result).setPositiveButton("OK",null).setNeutralButton("SHARE",(d,w)->shareText("TLS check",result)).show());}).start();
+    }
+
+    // --------------------------- V7 ADMIN / INTEGRATIONS ---------------------------
+    private void showAdminPanel() {
+        clearPage();comic("ADMIN HQ — local operator roles, secure secret storage, configuration and backup.",YELLOW);
+        card("MODE", "This build provides a local administration workspace. Server users, Google OAuth, 2FA, API requests and cloud database require a separately deployed backend.",LAV);
+        addButton("LOCAL OPERATOR / ROLE MANAGER",VIOLET,v->manageLocalRoles());
+        addButton("ENCRYPTED API TOKEN VAULT",PINK,v->saveIntegrationSecret());
+        addButton("HTTPS WEBHOOK ENDPOINT",VIOLET,v->configureWebhook());
+        addButton("TOGGLE LOCAL MAINTENANCE MODE",PINK,v->toggleMaintenanceMode());
+        addButton("DATABASE / BACKUP MANAGER",VIOLET,v->showBackupCenter());
+        addButton("SYSTEM HEALTH CHECK",PINK,v->showLiveMonitor());
+        card("SECURITY", "API tokens are encrypted with an Android Keystore AES-GCM key on this device. Do not paste production secrets into screenshots or public repositories.",SKY);
+    }
+
+    private void manageLocalRoles() {
+        JSONArray arr=storedArray("v7_local_roles");StringBuilder list=new StringBuilder("Saved local operators:\n");for(int i=0;i<arr.length();i++){JSONObject o=arr.optJSONObject(i);if(o!=null)list.append("• ").append(o.optString("name")).append(" — ").append(o.optString("role")).append("\n");}
+        LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);EditText name=new EditText(this);name.setHint("Operator label");form.addView(name);Spinner role=new Spinner(this);String[] roles={"ADMIN","MODERATOR","VIEWER"};role.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,roles));form.addView(role);
+        new AlertDialog.Builder(this).setTitle("Local roles").setMessage(list.toString()).setView(form).setNegativeButton("Close",null).setPositiveButton("ADD OPERATOR",(d,w)->{String n=name.getText().toString().trim();if(n.isEmpty())return;JSONArray a=storedArray("v7_local_roles");JSONObject o=new JSONObject();try{o.put("name",n);o.put("role",String.valueOf(role.getSelectedItem()));o.put("createdAt",System.currentTimeMillis());a.put(o);saveArray("v7_local_roles",a);log("Local operator role added: "+n);toast("Local role saved. This is not a server account.");}catch(Exception ignored){}}).show();
+    }
+
+    private void saveIntegrationSecret() {
+        LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);Spinner service=new Spinner(this);String[] services={"telegram_bot_token","whatsapp_business_token","backend_api_key"};service.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,services));form.addView(service);EditText secret=new EditText(this);secret.setHint("Paste token / API key");secret.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);form.addView(secret);
+        new AlertDialog.Builder(this).setTitle("Encrypted token vault").setMessage("Saved only in Android Keystore-backed local encryption. No API request is made by this screen.").setView(form).setNegativeButton("Cancel",null).setPositiveButton("SAVE",(d,w)->{String value=secret.getText().toString();if(value.isEmpty())return;try{SecretVault.put(this,String.valueOf(service.getSelectedItem()),value);log("Integration secret saved to Android Keystore vault");toast("Encrypted secret saved locally.");}catch(Exception e){toast("Could not encrypt this secret on the device.");}}).show();
+    }
+
+    private void configureWebhook() {
+        EditText input=new EditText(this);input.setHint("https://your-domain.example/webhook");input.setText(prefs.getString("v7_webhook_url",""));
+        new AlertDialog.Builder(this).setTitle("Webhook endpoint").setMessage("Only HTTPS endpoints are accepted. This saves configuration locally; it does not send events until a backend connector is implemented.").setView(input).setNegativeButton("Cancel",null).setPositiveButton("SAVE",(d,w)->{String u=input.getText().toString().trim();if(!u.isEmpty()&&!u.startsWith("https://")){toast("Webhook must use HTTPS.");return;}prefs.edit().putString("v7_webhook_url",u).apply();log("Webhook endpoint configuration changed");toast("Webhook URL saved locally.");}).show();
+    }
+
+    private void toggleMaintenanceMode() {
+        boolean on=!prefs.getBoolean("v7_maintenance",false);prefs.edit().putBoolean("v7_maintenance",on).apply();log("Local maintenance mode "+(on?"enabled":"disabled"));toast("Local maintenance mode "+(on?"ON":"OFF"));
+    }
+
+    // --------------------------- V7 BOT MANAGER ---------------------------
+    private void showBotManager() {
+        clearPage();comic("BOT STUDIO — reusable FAQ templates and channel handoff.",PINK);
+        card("INTEGRATION STATUS", "Telegram / WhatsApp API tokens can be stored in the encrypted local vault. A real bot needs an approved provider account, HTTPS webhook backend and server-side message handling.",LAV);
+        addButton("ADD FAQ / AUTO-REPLY TEMPLATE",VIOLET,v->addFaqTemplate());
+        addButton("VIEW FAQ / REPLY TEMPLATES",PINK,v->viewFaqTemplates());
+        addButton("SAVE TELEGRAM / WHATSAPP TOKEN",VIOLET,v->saveIntegrationSecret());
+        addButton("CONFIGURE HTTPS WEBHOOK",PINK,v->configureWebhook());
+        addButton("SHARE A TEMPLATE THROUGH AN APP",VIOLET,v->shareFaqTemplate());
+    }
+
+    private void addFaqTemplate() {
+        LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);EditText trigger=new EditText(this);trigger.setHint("Keyword / trigger");form.addView(trigger);EditText reply=new EditText(this);reply.setHint("FAQ answer / reply");reply.setMinLines(3);form.addView(reply);
+        new AlertDialog.Builder(this).setTitle("New local FAQ template").setView(form).setNegativeButton("Cancel",null).setPositiveButton("SAVE",(d,w)->{if(trigger.getText().toString().trim().isEmpty()||reply.getText().toString().trim().isEmpty())return;JSONArray a=storedArray("v7_faq_templates");JSONObject o=new JSONObject();try{o.put("trigger",trigger.getText().toString().trim());o.put("reply",reply.getText().toString());a.put(o);saveArray("v7_faq_templates",a);log("FAQ template saved");toast("FAQ saved locally.");}catch(Exception ignored){}}).show();
+    }
+
+    private void viewFaqTemplates() {
+        JSONArray a=storedArray("v7_faq_templates");if(a.length()==0){toast("No FAQ templates saved.");return;}String[] labels=new String[a.length()];for(int i=0;i<a.length();i++){JSONObject o=a.optJSONObject(i);labels[i]=o==null?"Template":o.optString("trigger");}
+        new AlertDialog.Builder(this).setTitle("FAQ templates").setItems(labels,(d,w)->{JSONObject o=a.optJSONObject(w);if(o!=null)new AlertDialog.Builder(this).setTitle(o.optString("trigger")).setMessage(o.optString("reply")).setPositiveButton("Done",null).setNeutralButton("SHARE",(dd,ww)->shareText("FAQ: "+o.optString("trigger"),o.optString("reply"))).show();}).setNegativeButton("Close",null).show();
+    }
+
+    private void shareFaqTemplate() {
+        JSONArray a=storedArray("v7_faq_templates");if(a.length()==0){toast("Add a FAQ template first.");return;}String[] labels=new String[a.length()];for(int i=0;i<a.length();i++){JSONObject o=a.optJSONObject(i);labels[i]=o==null?"Template":o.optString("trigger");}
+        new AlertDialog.Builder(this).setTitle("Choose FAQ to share").setItems(labels,(d,w)->{JSONObject o=a.optJSONObject(w);if(o!=null)shareText("FAQ: "+o.optString("trigger"),o.optString("reply"));}).setNegativeButton("Cancel",null).show();
+    }
+
+    private void shareText(String subject,String body) {
+        Intent i=new Intent(Intent.ACTION_SEND);i.setType("text/plain");i.putExtra(Intent.EXTRA_SUBJECT,subject);i.putExtra(Intent.EXTRA_TEXT,body);startActivity(Intent.createChooser(i,"Share using"));
+    }
+
+    // --------------------------- V7 MONITORING / NOTIFICATIONS ---------------------------
+    private void showLiveMonitor() {
+        clearPage();comic("LIVE MONITOR — refreshes local metrics while this page is open.",CYAN);
+        monitorReadout=text("Ready to monitor this device.",13,INK,false);monitorReadout.setPadding(dp(12),dp(12),dp(12),dp(12));monitorReadout.setBackgroundResource(R.drawable.panel);content.addView(monitorReadout);
+        addButton("START LIVE MONITOR",VIOLET,v->startLiveMonitor());addButton("STOP LIVE MONITOR",PINK,v->stopLiveMonitor());
+        card("METRICS SCOPE","RAM and app network byte counters are local to this app process. Battery, storage and active network type come from Android system APIs.",LAV);
+    }
+
+    private void startLiveMonitor() {
+        if(monitorReadout==null)return;if(monitorRunnable!=null)handler.removeCallbacks(monitorRunnable);monitorRunning=true;
+        monitorRunnable=new Runnable(){public void run(){if(!monitorRunning||monitorReadout==null)return;monitorReadout.setText(deviceSummary()+"\nApp RX: "+readableBytes(Math.max(0L,TrafficStats.getUidRxBytes(android.os.Process.myUid())))+"\nApp TX: "+readableBytes(Math.max(0L,TrafficStats.getUidTxBytes(android.os.Process.myUid()))));handler.postDelayed(this,2000L);}};monitorRunnable.run();log("Live monitor started");
+    }
+
+    private void stopLiveMonitor() {monitorRunning=false;if(monitorRunnable!=null)handler.removeCallbacks(monitorRunnable);toast("Live monitor stopped.");log("Live monitor stopped");}
+
+    private void showNotificationCenter() {
+        clearPage();comic("NOTIFICATION CENTER — local reminders and visible device prompts.",YELLOW);
+        card("PERMISSION","Android 13+ asks for notification permission when you schedule a reminder. No silent notification sending.",LAV);
+        addButton("REMIND ME IN 5 MINUTES",VIOLET,v->scheduleReminderWithPermission(5,"HugzzBotzX: review your device dashboard."));
+        addButton("REMIND ME IN 15 MINUTES",PINK,v->scheduleReminderWithPermission(15,"HugzzBotzX: scheduled task reminder."));
+        addButton("REMIND ME IN 60 MINUTES",VIOLET,v->scheduleReminderWithPermission(60,"HugzzBotzX: hourly check-in reminder."));
+        addButton("OPEN NOTIFICATION SETTINGS",PINK,v->openAppNotificationSettings());
+        card("RECENT LOCAL EVENTS",prefs.getString("logs","No activity yet."),SKY);
+    }
+
+    private void promptReminder() {scheduleReminderWithPermission(15,"HugzzBotzX: review your pending opt-in campaign.");}
+
+    private void scheduleReminderWithPermission(int minutes,String message) {
+        pendingReminderMinutes=minutes;pendingReminderText=message;
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},REQ_POST_NOTIFICATIONS);return;}
+        scheduleLocalReminder(minutes,message);
+    }
+
+    private void scheduleLocalReminder(int minutes,String message) {
+        try {
+            Intent i=new Intent(this,ReminderReceiver.class);i.putExtra("message",message);
+            PendingIntent pi=PendingIntent.getBroadcast(this,771,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+            AlarmManager am=(AlarmManager)getSystemService(ALARM_SERVICE);am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,System.currentTimeMillis()+Math.max(1,minutes)*60_000L,pi);
+            log("Local reminder scheduled for "+minutes+" minute(s)");toast("Reminder scheduled in "+minutes+" minutes.");
+        }catch(Exception e){toast("Could not schedule reminder.");}
+    }
+
+    // --------------------------- V7 BACKUP / RESTORE ---------------------------
+    private void showBackupCenter() {
+        clearPage();comic("BACKUP CENTER — export or restore HugzzBotzX local settings and opt-in records.",MINT);
+        card("WHAT IS INCLUDED","Local preferences such as sender opt-in list, device notes, roles, templates, routines and activity log. Android Keystore secrets are not exported.",LAV);
+        addButton("EXPORT JSON BACKUP",VIOLET,v->startBackupExport());
+        addButton("RESTORE JSON BACKUP",PINK,v->startBackupImport());
+        addButton("VIEW DATA RETENTION INFO",VIOLET,v->new AlertDialog.Builder(this).setTitle("Data retention").setMessage("Data remains in this app's private storage until you clear it or uninstall. Backup files are written only to a location you choose. API secrets in Android Keystore are excluded.").setPositiveButton("OK",null).show());
+    }
+
+    private void startBackupExport() {
+        Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"hugzzbotzx-v7-backup.json");startActivityForResult(i,REQ_EXPORT_BACKUP);
+    }
+
+    private void startBackupImport() {Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");startActivityForResult(i,REQ_IMPORT_BACKUP);}
+
+    private void writeBackup(Uri uri) {
+        try {
+            JSONObject root=new JSONObject();root.put("application","HugzzBotzX");root.put("schema",1);root.put("createdAt",System.currentTimeMillis());JSONObject data=new JSONObject();
+            for(Map.Entry<String,?> e:prefs.getAll().entrySet()){Object v=e.getValue();if(v instanceof String||v instanceof Boolean||v instanceof Integer||v instanceof Long||v instanceof Float||v instanceof Double)data.put(e.getKey(),v);}
+            root.put("preferences",data);try(OutputStream out=getContentResolver().openOutputStream(uri,"w")){if(out==null)throw new Exception("Destination cannot be opened");out.write(root.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+            log("Local settings backup exported");toast("Backup saved to your chosen location.");
+        }catch(Exception e){toast("Backup export failed: "+e.getMessage());}
+    }
+
+    private void readBackup(Uri uri) {
+        try(InputStream in=getContentResolver().openInputStream(uri);ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
+            if(in==null)throw new Exception("File cannot be opened");byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1)bytes.write(b,0,n);
+            JSONObject root=new JSONObject(new String(bytes.toByteArray(),java.nio.charset.StandardCharsets.UTF_8));if(!"HugzzBotzX".equals(root.optString("application")))throw new Exception("This backup does not belong to HugzzBotzX.");JSONObject data=root.getJSONObject("preferences");SharedPreferences.Editor edit=prefs.edit();edit.clear();java.util.Iterator<String> keys=data.keys();while(keys.hasNext()){String key=keys.next();Object value=data.get(key);if(value instanceof String)edit.putString(key,(String)value);else if(value instanceof Boolean)edit.putBoolean(key,(Boolean)value);else if(value instanceof Integer)edit.putInt(key,(Integer)value);else if(value instanceof Number)edit.putLong(key,((Number)value).longValue());}edit.apply();log("Local settings restored from JSON backup");toast("Backup restored. Reopen the page to refresh.");
+        }catch(Exception e){toast("Backup restore failed: "+e.getMessage());}
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode,int resultCode,Intent data) {
+        super.onActivityResult(requestCode,resultCode,data);
+        if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;
+        Uri uri=data.getData();
+        try{getContentResolver().takePersistableUriPermission(uri,data.getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}
+        if(requestCode==REQ_PICK_IMAGE)rememberSelectedUri(uri,"IMAGE");
+        else if(requestCode==REQ_PICK_VIDEO)rememberSelectedUri(uri,"VIDEO");
+        else if(requestCode==REQ_PICK_AUDIO)rememberSelectedUri(uri,"AUDIO");
+        else if(requestCode==REQ_PICK_APK)analyzeApk(uri);
+        else if(requestCode==REQ_PICK_HASH)hashSelectedFile(uri);
+        else if(requestCode==REQ_EXPORT_BACKUP)writeBackup(uri);
+        else if(requestCode==REQ_IMPORT_BACKUP)new AlertDialog.Builder(this).setTitle("Restore backup?").setMessage("This replaces local HugzzBotzX preferences with the selected backup. Continue only if you trust this file.").setNegativeButton("Cancel",null).setPositiveButton("RESTORE",(d,w)->readBackup(uri)).show();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults);
+        if(requestCode==REQ_MEDIA_PERMS){boolean any=false;for(int r:grantResults)if(r==PackageManager.PERMISSION_GRANTED)any=true;if(any){toast("Media permission updated. Only granted media categories are visible.");showMediaLibrary();}else{toast("No media library permission granted. You can still pick individual files.");showMediaCenter();}}
+        else if(requestCode==REQ_POST_NOTIFICATIONS){if(grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED)scheduleLocalReminder(pendingReminderMinutes,pendingReminderText);else toast("Notification permission denied. Reminder was not scheduled.");}
+        else if(requestCode==61||requestCode==62){if(grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED)toast("Camera permission granted. Tap the flashlight action again.");}
     }
 
     private void toast(String message) {

@@ -1,0 +1,13 @@
+HugzzBotzX V7.0 patch
+
+Extract this ZIP into the root of your existing HugzzBotzX-Android repository.
+Example in Termux:
+  cd ~/projects/HugzzBotzX
+  unzip -o /sdcard/Download/HugzzBotzX-V7-Patch.zip -d .
+  git status --short
+  git add -A
+  git commit -m "Upgrade HugzzBotzX V7 Ultimate System"
+  git push origin main
+
+Keep the existing .git folder. This patch does not delete it.
+Media access is asked only from the Media Center. Android retains runtime grants until you revoke them; the app queries media only when the Media Center is opened. No MANAGE_EXTERNAL_STORAGE permission is requested.
